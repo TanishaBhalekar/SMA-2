@@ -4,10 +4,13 @@
 !.env.example
 
 # Database
+app.db
 app.db*
 *.sqlite
 *.sqlite3
-*.db*
+*.db
+*.db-shm
+*.db-wal
 
 # Python
 __pycache__/
