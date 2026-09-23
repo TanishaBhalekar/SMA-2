@@ -5,8 +5,8 @@ export default function MetricCards({ stats, loading, onRefresh }) {
   const cards = [
     {
       title: 'Sources Ingested',
-      value: stats ? stats.total_sources?.toLocaleString() : '4',
-      subtitle: `${stats ? stats.sources_indexed ?? stats.total_sources : 4} Active Silos`,
+      value: stats ? (stats.total_sources ?? 0).toLocaleString() : '0',
+      subtitle: `${stats ? (stats.sources_indexed ?? stats.total_sources ?? 0) : 0} Active Silos`,
       icon: Database,
       color: 'blue',
       gradient: 'from-blue-500/20 to-blue-600/5',
@@ -16,8 +16,8 @@ export default function MetricCards({ stats, loading, onRefresh }) {
     },
     {
       title: 'Attributes Indexed',
-      value: stats ? stats.total_attributes?.toLocaleString() : '20,400',
-      subtitle: `${stats ? stats.unique_normalized_values?.toLocaleString() ?? '11,400' : '11,400'} unique keys`,
+      value: stats ? (stats.total_attributes ?? 0).toLocaleString() : '0',
+      subtitle: `${stats ? (stats.unique_normalized_values ?? 0).toLocaleString() : '0'} unique keys`,
       icon: Layers,
       color: 'emerald',
       gradient: 'from-emerald-500/20 to-emerald-600/5',
@@ -27,7 +27,7 @@ export default function MetricCards({ stats, loading, onRefresh }) {
     },
     {
       title: 'Master Entities Discovered',
-      value: stats ? stats.master_entities?.toLocaleString() : '1,200',
+      value: stats ? (stats.master_entities ?? 0).toLocaleString() : '0',
       subtitle: 'Disjoint Identity Clusters',
       icon: Users,
       color: 'purple',
@@ -38,8 +38,8 @@ export default function MetricCards({ stats, loading, onRefresh }) {
     },
     {
       title: 'Multi-Hop Links Formed',
-      value: stats ? stats.multi_hop_links?.toLocaleString() : '4,800',
-      subtitle: 'Avg 4.0 hops / entity',
+      value: stats ? (stats.multi_hop_links ?? 0).toLocaleString() : '0',
+      subtitle: `${stats && stats.master_entities > 0 ? (stats.multi_hop_links / stats.master_entities).toFixed(1) : '0'} avg hops / entity`,
       icon: GitFork,
       color: 'amber',
       gradient: 'from-amber-500/20 to-amber-600/5',
@@ -48,6 +48,7 @@ export default function MetricCards({ stats, loading, onRefresh }) {
       badge: 'BFS Traversal',
     },
   ];
+
 
   return (
     <div className="mb-8">

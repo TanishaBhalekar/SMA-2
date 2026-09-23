@@ -6,23 +6,28 @@ import {
 import { BarChart3, PieChart as PieIcon, Layers, TrendingUp } from 'lucide-react';
 import { api } from '../api/client';
 
-const SILO_COLORS = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#06B6D4'];
+import { useWorkspace } from '../context/WorkspaceContext';
+
+const SILO_COLORS = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#06B6D4', '#EC4899', '#84CC16', '#6366F1'];
 
 export default function AnalyticsDashboard({ stats, darkMode }) {
+  const { currentWorkspace } = useWorkspace();
   const [sources, setSources] = useState([]);
 
   useEffect(() => {
-    api.listSources()
+    if (!currentWorkspace?.id) return;
+    api.listSources(currentWorkspace.id)
       .then((res) => setSources(res.data || []))
       .catch((err) => console.error(err));
-  }, []);
+  }, [currentWorkspace?.id]);
 
   // Format data for Silo Records Bar Chart
   const siloData = sources.map((s) => ({
     name: s.name.replace('.csv', '').replace('.sql', '').replace('_', ' ').toUpperCase(),
-    records: s.record_count || 1200,
+    records: s.record_count || 0,
     type: s.source_type,
   }));
+
 
   // Attribute distribution mock/calculated data
   const attributeDistribution = [
@@ -69,18 +74,14 @@ export default function AnalyticsDashboard({ stats, darkMode }) {
               </p>
             </div>
             <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-              4 Silos Active
+              {sources.length} {sources.length === 1 ? 'Silo Active' : 'Silos Active'}
             </span>
           </div>
 
           <div className="h-64 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={siloData.length ? siloData : [
-                { name: 'HR DB', records: 1200 },
-                { name: 'CRM DB', records: 1200 },
-                { name: 'PLATFORM DB', records: 1200 },
-                { name: 'MEMBERSHIP DB', records: 1200 },
-              ]}>
+              <BarChart data={siloData}>
+
                 <XAxis
                   dataKey="name"
                   stroke={darkMode ? '#94A3B8' : '#64748B'}

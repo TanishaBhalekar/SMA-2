@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
-import { Search, Loader2, Sparkles, AlertCircle, RefreshCw, CheckCircle, Database } from 'lucide-react';
+import { Search, Loader2, Sparkles, AlertCircle, RefreshCw, CheckCircle, Database, FolderKanban, ArrowRight } from 'lucide-react';
 import { api } from '../api/client';
+import { useWorkspace } from '../context/WorkspaceContext';
 import HopVisualizer from './HopVisualizer';
 import MasterEntityCard from './MasterEntityCard';
 import GeminiAccordion from './GeminiAccordion';
 
-export default function DiscoveryExplorer() {
+export default function DiscoveryExplorer({ onNavigateToSources }) {
+  const { currentWorkspace } = useWorkspace();
+
   const [identifierType, setIdentifierType] = useState('email');
   const [identifierValue, setIdentifierValue] = useState('');
   const [loading, setLoading] = useState(false);
@@ -20,7 +23,7 @@ export default function DiscoveryExplorer() {
     setExecutedSeed({ field: fieldType, value: val.trim() });
 
     try {
-      const res = await api.searchEntity(fieldType, val.trim());
+      const res = await api.searchEntity(fieldType, val.trim(), currentWorkspace?.id);
       setDiscoveryResult(res.data);
     } catch (err) {
       console.error('Search failed:', err);
@@ -41,15 +44,26 @@ export default function DiscoveryExplorer() {
     <div>
       {/* Search Control Bar */}
       <div className="rounded-2xl p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm mb-8">
-        <div className="mb-4">
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
-            <Search className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            Progressive Discovery Explorer
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Enter any single fragmented anchor identifier to trigger automated cross-silo graph traversal
-          </p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+              <Search className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+              Progressive Discovery Explorer
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Enter any single anchor identifier to trigger automated cross-silo graph traversal
+            </p>
+          </div>
+
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700/60 self-start sm:self-auto">
+            <FolderKanban className="w-3.5 h-3.5 text-indigo-500" />
+            <span className="text-[11px] text-slate-400">Scope:</span>
+            <span className="font-semibold text-slate-900 dark:text-white truncate max-w-[160px]">
+              {currentWorkspace?.name || 'Active Session'}
+            </span>
+          </div>
         </div>
+
 
         <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row items-stretch gap-3">
           {/* Identifier Type Selector */}
@@ -162,6 +176,47 @@ export default function DiscoveryExplorer() {
           />
         </div>
       )}
+
+      {/* Clean Slate Landing Placeholder */}
+      {!discoveryResult && !loading && !error && (
+        <div className="rounded-2xl p-10 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center shadow-sm">
+          <div className="w-12 h-12 mx-auto mb-4 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+            <Sparkles className="w-6 h-6" />
+          </div>
+          <h3 className="font-bold text-base text-slate-900 dark:text-white mb-2">
+            Ready for Progressive Graph Traversal
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-6">
+            Querying is scoped to session <strong className="text-slate-800 dark:text-slate-200 font-semibold">{currentWorkspace?.name}</strong>.
+            The progressive BFS engine traverses email, phone numbers, usernames, and member IDs across all uploaded silos in this session.
+          </p>
+
+          <div className="inline-flex flex-col sm:flex-row items-center gap-2 p-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs">
+            <span className="text-slate-400 px-2 font-medium">Quick suggestions:</span>
+            <button
+              onClick={() => {
+                setIdentifierType('email');
+                setIdentifierValue('john@example.com');
+                triggerSearch('email', 'john@example.com');
+              }}
+              className="px-3 py-1 rounded-lg bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 font-mono text-[11px] shadow-sm border border-slate-200 dark:border-slate-700 transition-colors"
+            >
+              john@example.com
+            </button>
+            <button
+              onClick={() => {
+                setIdentifierType('phone');
+                setIdentifierValue('9876543210');
+                triggerSearch('phone', '9876543210');
+              }}
+              className="px-3 py-1 rounded-lg bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 font-mono text-[11px] shadow-sm border border-slate-200 dark:border-slate-700 transition-colors"
+            >
+              9876543210
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

@@ -18,6 +18,37 @@ from backend.services.normalizer import normalize_field
 from backend.services.field_mapper import suggest_mappings
 
 
+def extract_column_samples(file_path: str, columns: List[str], source_type: str = "CSV", max_samples: int = 3) -> Dict[str, List[str]]:
+    """
+    Extracts up to max_samples real non-null sample values for each column.
+    """
+    col_samples: Dict[str, List[str]] = {c: [] for c in columns}
+    try:
+        if source_type.upper() == "CSV":
+            df = pd.read_csv(file_path, nrows=25, dtype=str, keep_default_na=False)
+            for c in columns:
+                if c in df.columns:
+                    for val in df[c]:
+                        v_str = str(val).strip()
+                        if v_str and v_str.lower() != "nan" and v_str not in col_samples[c]:
+                            col_samples[c].append(v_str)
+                        if len(col_samples[c]) >= max_samples:
+                            break
+        elif source_type.upper() == "SQL":
+            for chunk in stream_sql_records(file_path, columns, chunksize=25):
+                for row in chunk:
+                    for c in columns:
+                        v = row.get(c)
+                        if v is not None:
+                            v_str = str(v).strip()
+                            if v_str and v_str.lower() != "nan" and v_str not in col_samples[c]:
+                                col_samples[c].append(v_str)
+                break
+    except Exception:
+        pass
+    return col_samples
+
+
 def inspect_file_schema(file_path: str, source_type: str = "CSV") -> Tuple[str, List[str], List[Dict[str, Any]]]:
     """
     Inspects a file to detect table/source name, column headers, and top sample rows.
@@ -202,6 +233,7 @@ def ingest_source(source_id: int, db: Optional[Session] = None, chunksize: int =
                         if val_str and val_str.lower() != "nan":
                             norm_val = normalize_field(canonical_field, val_str)
                             attribute_entries.append({
+                                "workspace_id": source.workspace_id,
                                 "source_id": source.id,
                                 "record_index": rec_idx,
                                 "canonical_field": canonical_field,
@@ -209,6 +241,7 @@ def ingest_source(source_id: int, db: Optional[Session] = None, chunksize: int =
                                 "normalized_value": norm_val,
                                 "is_identifier": col_def.is_identifier
                             })
+
 
             # Bulk insert chunk of attribute indices
             if attribute_entries:

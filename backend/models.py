@@ -13,6 +13,29 @@ from backend.database import Base
 
 
 # ============================================================================
+# Workspace & Ingestion Session Models
+# ============================================================================
+
+class Workspace(Base):
+    """
+    Dynamic Workspace / Ingestion Session container.
+    Encapsulates arbitrary numbers of operational data silos, EAV indexes, and resolved entities.
+    """
+    __tablename__ = "workspaces"
+
+    id = Column(String(36), primary_key=True, index=True)  # UUID string
+    name = Column(String(255), nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    sources = relationship("Source", back_populates="workspace", cascade="all, delete-orphan")
+    attribute_indices = relationship("AttributeIndex", back_populates="workspace", cascade="all, delete-orphan")
+    master_entities = relationship("MasterEntity", back_populates="workspace", cascade="all, delete-orphan")
+
+
+# ============================================================================
 # Operational Silo & Data Lineage Models
 # ============================================================================
 
@@ -24,6 +47,7 @@ class Source(Base):
     __tablename__ = "sources"
 
     id = Column(Integer, primary_key=True, index=True)
+    workspace_id = Column(String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True, index=True)
     name = Column(String(255), nullable=False, index=True)
     source_type = Column(String(50), nullable=False)  # 'CSV' or 'SQL'
     file_path = Column(String(500), nullable=False)
@@ -32,6 +56,7 @@ class Source(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
+    workspace = relationship("Workspace", back_populates="sources")
     columns = relationship("SourceColumn", back_populates="source", cascade="all, delete-orphan")
     attributes = relationship("AttributeIndex", back_populates="source", cascade="all, delete-orphan")
 
@@ -43,7 +68,7 @@ class SourceColumn(Base):
     __tablename__ = "source_columns"
 
     id = Column(Integer, primary_key=True, index=True)
-    source_id = Column(Integer, ForeignKey("sources.id"), nullable=False, index=True)
+    source_id = Column(Integer, ForeignKey("sources.id", ondelete="CASCADE"), nullable=False, index=True)
     original_name = Column(String(255), nullable=False)
     canonical_field = Column(String(100), nullable=False, index=True)
     confidence_score = Column(Float, default=1.0)
@@ -60,17 +85,20 @@ class AttributeIndex(Base):
     __tablename__ = "attribute_indices"
 
     id = Column(Integer, primary_key=True, index=True)
-    source_id = Column(Integer, ForeignKey("sources.id"), nullable=False, index=True)
+    workspace_id = Column(String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True, index=True)
+    source_id = Column(Integer, ForeignKey("sources.id", ondelete="CASCADE"), nullable=False, index=True)
     record_index = Column(Integer, nullable=False, index=True)
     canonical_field = Column(String(100), nullable=False, index=True)
     original_value = Column(Text, nullable=True)
     normalized_value = Column(String(500), nullable=True, index=True)
     is_identifier = Column(Boolean, default=False, index=True)
 
+    workspace = relationship("Workspace", back_populates="attribute_indices")
     source = relationship("Source", back_populates="attributes")
 
     __table_args__ = (
         Index("ix_attr_canonical_normalized", "canonical_field", "normalized_value"),
+        Index("ix_attr_workspace_canonical_norm", "workspace_id", "canonical_field", "normalized_value"),
     )
 
 
@@ -85,11 +113,13 @@ class MasterEntity(Base):
     __tablename__ = "master_entities"
 
     id = Column(String(100), primary_key=True, index=True)  # e.g., 'ENT-1042'
+    workspace_id = Column(String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True, index=True)
     canonical_name = Column(String(255), nullable=False, index=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
+    workspace = relationship("Workspace", back_populates="master_entities")
     attributes = relationship("EntityAttribute", back_populates="entity", cascade="all, delete-orphan")
     hops = relationship("EnrichmentHop", back_populates="entity", cascade="all, delete-orphan", order_by="EnrichmentHop.step_order")
 
@@ -101,8 +131,8 @@ class EntityAttribute(Base):
     __tablename__ = "entity_attributes"
 
     id = Column(Integer, primary_key=True, index=True)
-    entity_id = Column(String(100), ForeignKey("master_entities.id"), nullable=False, index=True)
-    source_id = Column(Integer, ForeignKey("sources.id"), nullable=False, index=True)
+    entity_id = Column(String(100), ForeignKey("master_entities.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_id = Column(Integer, ForeignKey("sources.id", ondelete="CASCADE"), nullable=False, index=True)
     record_index = Column(Integer, nullable=False)
     canonical_field = Column(String(100), nullable=False, index=True)
     original_value = Column(Text, nullable=True)
@@ -120,9 +150,9 @@ class EnrichmentHop(Base):
     __tablename__ = "enrichment_hops"
 
     id = Column(Integer, primary_key=True, index=True)
-    entity_id = Column(String(100), ForeignKey("master_entities.id"), nullable=False, index=True)
+    entity_id = Column(String(100), ForeignKey("master_entities.id", ondelete="CASCADE"), nullable=False, index=True)
     step_order = Column(Integer, nullable=False)
-    source_id = Column(Integer, ForeignKey("sources.id"), nullable=False, index=True)
+    source_id = Column(Integer, ForeignKey("sources.id", ondelete="CASCADE"), nullable=False, index=True)
     matched_field = Column(String(100), nullable=False)
     matched_value = Column(String(500), nullable=False)
     discovered_field = Column(String(100), nullable=False)
@@ -130,6 +160,7 @@ class EnrichmentHop(Base):
 
     entity = relationship("MasterEntity", back_populates="hops")
     source = relationship("Source")
+
 
 
 # ============================================================================

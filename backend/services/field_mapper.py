@@ -16,20 +16,22 @@ CANONICAL_FIELDS = [
     "email",
     "phone",
     "username",
+    "source_record_id",
     "member_id",
     "address",
     "company",
+    "metadata",
     "loyalty_tier"
 ]
 
 # High-priority identifier attributes for progressive entity resolution
-IDENTIFIER_FIELDS = {"email", "phone", "username", "member_id"}
+IDENTIFIER_FIELDS = {"email", "phone", "username", "source_record_id", "member_id"}
 
 # Rule-based synonym dictionary for deterministic fast-path mapping
 SYNONYM_MAP = {
     "name": [
         "name", "full_name", "fullname", "display_name", "client_name",
-        "customer_name", "employee_name", "person_name", "emp_name", "user_name_display"
+        "customer_name", "employee_name", "person_name", "emp_name", "primary_contact"
     ],
     "email": [
         "email", "email_id", "email_address", "e_mail", "mail", "user_email",
@@ -38,11 +40,16 @@ SYNONYM_MAP = {
     "phone": [
         "phone", "mobile", "mobile_no", "mobile_number", "contact_no",
         "contact_number", "contact", "telephone", "cell", "cell_phone",
-        "phone_number", "platform_phone", "tel"
+        "phone_number", "contact_cell", "tel"
     ],
     "username": [
-        "username", "user_name", "handle", "login", "alias", "account_name",
+        "username", "user_name", "handle", "user_handle", "login", "alias", "account_name",
         "screen_name", "nick", "nickname"
+    ],
+    "source_record_id": [
+        "source_record_id", "record_id", "id", "customer_id", "contact_id",
+        "company_id", "member_id", "user_key", "user_id", "account_id",
+        "rec_id", "client_id", "entry_id"
     ],
     "member_id": [
         "member_id", "membership_id", "member_no", "membership_no",
@@ -50,11 +57,15 @@ SYNONYM_MAP = {
     ],
     "address": [
         "address", "addr", "location", "street", "city", "residence",
-        "postal_address", "billing_address", "shipping_address"
+        "postal_address", "billing_address", "shipping_address", "street_address"
     ],
     "company": [
         "company", "organization", "organisation", "employer", "org",
-        "company_name", "firm", "workplace", "business_name"
+        "company_name", "firm", "workplace", "business_name", "org_name"
+    ],
+    "metadata": [
+        "account_status", "notes", "status", "description", "comments",
+        "remarks", "metadata", "extra", "profile_status"
     ],
     "loyalty_tier": [
         "loyalty_tier", "tier", "membership_tier", "loyalty_status",
@@ -62,73 +73,137 @@ SYNONYM_MAP = {
     ]
 }
 
-# Regex heuristics for column names
-REGEX_RULES = [
-    (re.compile(r"^.*(?:email|mail).*$", re.I), "email"),
-    (re.compile(r"^.*(?:phone|mobile|contact_no|cell).*$", re.I), "phone"),
-    (re.compile(r"^.*(?:full_?name|display_?name).*$", re.I), "name"),
-    (re.compile(r"^.*(?:user_?name|handle|login).*$", re.I), "username"),
-    (re.compile(r"^.*(?:member_?id|loyalty_?id).*$", re.I), "member_id"),
-    (re.compile(r"^.*(?:address|street|city).*$", re.I), "address"),
-    (re.compile(r"^.*(?:company|org(?:anization)?|employer).*$", re.I), "company"),
-    (re.compile(r"^.*(?:loyalty|tier).*$", re.I), "loyalty_tier"),
-]
-
 
 def _rule_based_match(col_name: str, sample_values: List[Any]) -> Optional[Dict[str, Any]]:
     """
-    Attempt deterministic dictionary and regex-based matching for a column.
+    Attempt deterministic dictionary and pattern-based matching for a column.
+    Follows canonical target mapping rules:
+      - Columns ending with _id, _code, _key, record_id, id -> source_record_id (identifier)
+      - username, user_handle, handle -> username (identifier)
+      - company, organization, org_name -> company
+      - city, street_address, address, location -> address
+      - email, email_address, work_email -> email (identifier)
+      - phone, mobile_number, contact_no, contact_cell -> phone (identifier)
+      - full_name, name, primary_contact -> name
+      - account_status, notes, etc. -> metadata
     """
-    col_clean = col_name.strip().lower()
+    col_clean = col_name.strip().lower().replace(" ", "_").replace("-", "_")
 
-    # 1. Exact match against canonical vocabulary
-    if col_clean in CANONICAL_FIELDS:
+    # 1. Email rule (checked first to prevent email_id being matched as generic _id)
+    if (
+        col_clean in ("email", "email_address", "work_email", "email_id", "contact_email", "user_email", "personal_email", "primary_email", "mail")
+        or "email" in col_clean
+        or col_clean.endswith("mail")
+    ):
         return {
-            "canonical_field": col_clean,
-            "confidence": 1.0,
+            "canonical_field": "email",
+            "confidence": 0.98,
             "method": "rule_based",
-            "reasoning": f"Exact match with canonical field '{col_clean}'."
+            "reasoning": f"Column '{col_name}' matched email identifier pattern."
         }
 
-    # 2. Synonym dictionary check
-    for canonical, synonyms in SYNONYM_MAP.items():
-        if col_clean in synonyms:
-            return {
-                "canonical_field": canonical,
-                "confidence": 0.95,
-                "method": "rule_based",
-                "reasoning": f"Column '{col_name}' matched synonym for canonical '{canonical}'."
-            }
+    # 2. Phone rule
+    if (
+        col_clean in ("phone", "mobile_number", "contact_no", "contact_cell", "mobile", "telephone", "cell", "cell_phone", "contact_number", "phone_number")
+        or any(k in col_clean for k in ("phone", "mobile", "contact_no", "contact_cell"))
+    ):
+        return {
+            "canonical_field": "phone",
+            "confidence": 0.98,
+            "method": "rule_based",
+            "reasoning": f"Column '{col_name}' matched phone identifier pattern."
+        }
 
-    # 3. Column name regex check
-    for pattern, canonical in REGEX_RULES:
-        if pattern.match(col_clean):
-            return {
-                "canonical_field": canonical,
-                "confidence": 0.85,
-                "method": "rule_based",
-                "reasoning": f"Regex pattern matched canonical '{canonical}' for '{col_name}'."
-            }
+    # 3. Username rule
+    if (
+        col_clean in ("username", "user_handle", "handle", "user_name", "login", "alias", "screen_name")
+        or col_clean.endswith(("username", "handle"))
+    ):
+        return {
+            "canonical_field": "username",
+            "confidence": 0.95,
+            "method": "rule_based",
+            "reasoning": f"Column '{col_name}' matched username identifier pattern."
+        }
 
-    # 4. Value-level regex inspection (e.g., if col_name is ambiguous like 'val1', check values)
+    # 4. Identifier ID checks: ending with _id, _code, _key, record_id, id
+    if (
+        col_clean in ("id", "record_id", "source_record_id", "user_key", "rec_id", "customer_id", "contact_id", "company_id", "member_id")
+        or col_clean.endswith(("_id", "_code", "_key", "record_id", "id"))
+    ):
+        return {
+            "canonical_field": "source_record_id",
+            "confidence": 0.98,
+            "method": "rule_based",
+            "reasoning": f"Column '{col_name}' conforms to entity record identifier pattern."
+        }
+
+    # 5. Name rule
+    if (
+        col_clean in ("full_name", "name", "primary_contact", "display_name", "client_name", "customer_name", "contact_name", "person_name", "fullname")
+        or col_clean.endswith(("full_name", "primary_contact"))
+    ):
+        return {
+            "canonical_field": "name",
+            "confidence": 0.95,
+            "method": "rule_based",
+            "reasoning": f"Column '{col_name}' matched person/contact name."
+        }
+
+    # 6. Company rule
+    if (
+        col_clean in ("company", "organization", "org_name", "employer", "firm", "business_name", "company_name", "org")
+        or "company" in col_clean
+        or "organization" in col_clean
+    ):
+        return {
+            "canonical_field": "company",
+            "confidence": 0.95,
+            "method": "rule_based",
+            "reasoning": f"Column '{col_name}' matched company/organization field."
+        }
+
+    # 7. Address rule
+    if (
+        col_clean in ("city", "street_address", "address", "location", "street", "residence", "postal_address", "state", "zip", "zipcode")
+        or any(k in col_clean for k in ("address", "city", "location", "street"))
+    ):
+        return {
+            "canonical_field": "address",
+            "confidence": 0.95,
+            "method": "rule_based",
+            "reasoning": f"Column '{col_name}' matched address/location field."
+        }
+
+    # 8. Metadata rule
+    if (
+        col_clean in ("account_status", "notes", "status", "description", "comments", "remarks", "tier", "loyalty_tier", "metadata")
+        or any(k in col_clean for k in ("status", "notes", "comment", "desc"))
+    ):
+        return {
+            "canonical_field": "metadata",
+            "confidence": 0.90,
+            "method": "rule_based",
+            "reasoning": f"Column '{col_name}' mapped to metadata/status attribute."
+        }
+
+    # 9. Value-level regex inspection for ambiguous columns
     if sample_values:
-        valid_samples = [str(s).strip() for s in sample_values if s is not None and str(s).strip()]
+        valid_samples = [str(s).strip() for s in sample_values if s is not None and str(s).strip() and str(s).strip().lower() != "nan"]
         if valid_samples:
-            # Check email pattern in sample values
             if all("@" in s and "." in s.split("@")[-1] for s in valid_samples):
                 return {
                     "canonical_field": "email",
                     "confidence": 0.90,
                     "method": "rule_based",
-                    "reasoning": f"Values in column '{col_name}' exhibit valid email formats."
+                    "reasoning": f"Sample values in '{col_name}' exhibit valid email format."
                 }
-            # Check phone pattern in sample values (digits with optional +, len 10-14)
             if all(re.match(r"^\+?[0-9\s\-]{9,15}$", s) for s in valid_samples):
                 return {
                     "canonical_field": "phone",
                     "confidence": 0.85,
                     "method": "rule_based",
-                    "reasoning": f"Values in column '{col_name}' conform to standard phone format."
+                    "reasoning": f"Sample values in '{col_name}' conform to standard phone format."
                 }
 
     return None
@@ -150,16 +225,16 @@ def _query_gemini_mappings(unmapped_cols: Dict[str, List[Any]]) -> Dict[str, Dic
 You are an expert data architect mapping operational database fields to a canonical data schema.
 Canonical Target Fields: {CANONICAL_FIELDS}
 
-Analyze the following database columns and their 3 sample values:
+Analyze the following database columns and their sample values:
 {json.dumps(unmapped_cols, indent=2)}
 
 For each column, determine the best canonical field from {CANONICAL_FIELDS}.
-If a column does not belong to any canonical field, assign "custom".
+If a column does not belong to any canonical field, assign "metadata".
 
 Respond strictly with valid JSON with the format:
 {{
   "column_name": {{
-    "canonical_field": "canonical_name_or_custom",
+    "canonical_field": "canonical_name",
     "confidence": 0.85,
     "reasoning": "brief explanation"
   }}
@@ -171,16 +246,15 @@ Respond strictly with valid JSON with the format:
         )
 
         resp_text = response.text.strip()
-        # Clean markdown code blocks if present
         if resp_text.startswith("```"):
             resp_text = re.sub(r"^```(?:json)?\n?", "", resp_text)
             resp_text = re.sub(r"\n?```$", "", resp_text)
 
         parsed = json.loads(resp_text)
         for col, mapping in parsed.items():
-            canonical = mapping.get("canonical_field", "custom")
-            if canonical not in CANONICAL_FIELDS and canonical != "custom":
-                canonical = "custom"
+            canonical = mapping.get("canonical_field", "metadata")
+            if canonical not in CANONICAL_FIELDS:
+                canonical = "metadata"
             confidence = float(mapping.get("confidence", 0.80))
             reasoning = mapping.get("reasoning", "Classified via Gemini LLM semantic analysis.")
             results[col] = {
@@ -189,32 +263,36 @@ Respond strictly with valid JSON with the format:
                 "method": "llm_gemini",
                 "reasoning": reasoning
             }
-    except Exception as e:
-        # Gracefully handle API failures, network errors, or auth issues
+    except Exception:
         pass
 
     return results
 
 
-def suggest_mappings(columns: List[str], sample_rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+def suggest_mappings(
+    columns: List[str],
+    sample_rows: List[Dict[str, Any]],
+    column_samples: Optional[Dict[str, List[Any]]] = None
+) -> Dict[str, Dict[str, Any]]:
     """
     Inspects schema columns and sample rows, suggesting canonical field mappings.
-
-    Process:
-      1. Fast rule-based regex and synonym dictionary matching.
-      2. If unmapped or confidence < 0.80, queries Gemini API with column name + 3 sample values.
-      3. Fallback: If GEMINI_API_KEY is missing or API fails, assigns 'custom' with 50% confidence.
-      4. Assigns is_identifier = True for fields in ['email', 'phone', 'username', 'member_id'].
+    Assigns is_identifier = True for fields in IDENTIFIER_FIELDS.
     """
     mappings: Dict[str, Dict[str, Any]] = {}
     unmapped_for_llm: Dict[str, List[Any]] = {}
 
-    # Extract sample values per column (up to 3 samples)
-    col_samples: Dict[str, List[Any]] = {col: [] for col in columns}
-    for row in sample_rows[:3]:
-        for col in columns:
-            if col in row and row[col] is not None:
-                col_samples[col].append(row[col])
+    # Extract sample values per column (non-null, non-empty, up to 3 samples)
+    col_samples: Dict[str, List[Any]] = {}
+    if column_samples:
+        col_samples = {col: [s for s in samples if s is not None and str(s).strip() and str(s).strip().lower() != "nan"][:3] for col, samples in column_samples.items()}
+    else:
+        col_samples = {col: [] for col in columns}
+        for row in sample_rows:
+            for col in columns:
+                if col in row and row[col] is not None:
+                    val_str = str(row[col]).strip()
+                    if val_str and val_str.lower() != "nan" and val_str not in col_samples[col]:
+                        col_samples[col].append(val_str)
 
     # Step 1: Rule-based mapping
     for col in columns:
@@ -225,7 +303,7 @@ def suggest_mappings(columns: List[str], sample_rows: List[Dict[str, Any]]) -> D
         else:
             unmapped_for_llm[col] = samples[:3]
 
-    # Step 2: LLM Disambiguation for unmapped or low-confidence columns
+    # Step 2: LLM Disambiguation for unmapped columns
     if unmapped_for_llm:
         llm_results = _query_gemini_mappings(unmapped_for_llm)
         for col, llm_mapping in llm_results.items():
@@ -234,14 +312,14 @@ def suggest_mappings(columns: List[str], sample_rows: List[Dict[str, Any]]) -> D
                 if col in unmapped_for_llm:
                     del unmapped_for_llm[col]
 
-    # Step 3: Fallback for any remaining unmapped columns
+    # Step 3: Fallback for any remaining unmapped columns -> map to metadata
     for col in columns:
         if col not in mappings:
             mappings[col] = {
-                "canonical_field": "custom",
-                "confidence": 0.50,
+                "canonical_field": "metadata",
+                "confidence": 0.70,
                 "method": "fallback",
-                "reasoning": "No matching rule and Gemini LLM unavailable or inconclusive; assigned fallback."
+                "reasoning": f"Defaulted to metadata attribute for column '{col}'."
             }
 
     # Step 4: Mark identifiers

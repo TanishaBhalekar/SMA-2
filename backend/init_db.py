@@ -15,6 +15,7 @@ from sqlalchemy import inspect
 from backend.database import engine, Base
 # Import all models to register with Base.metadata
 from backend.models import (
+    Workspace,
     Source,
     SourceColumn,
     AttributeIndex,

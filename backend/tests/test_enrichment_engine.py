@@ -95,16 +95,17 @@ def setup_ingested_silos():
         yield source_ids
 
     finally:
-        # Cleanup
+        # Cleanup: delete hops and entity attributes first to respect foreign key constraints
+        db.query(EnrichmentHop).delete()
+        db.query(EntityAttribute).delete()
+        db.query(MasterEntity).delete()
         for sid in source_ids:
             db.query(AttributeIndex).filter_by(source_id=sid).delete()
             db.query(SourceColumn).filter_by(source_id=sid).delete()
             db.query(Source).filter_by(id=sid).delete()
-        db.query(EntityAttribute).delete()
-        db.query(EnrichmentHop).delete()
-        db.query(MasterEntity).delete()
         db.commit()
         db.close()
+
 
 
 def test_progressive_enrich_john_doe(setup_ingested_silos):

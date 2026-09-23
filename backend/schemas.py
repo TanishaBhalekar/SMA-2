@@ -102,6 +102,7 @@ class MappingConfirmationRequest(BaseModel):
 
 class SourceResponse(BaseModel):
     id: int
+    workspace_id: Optional[str] = None
     name: str
     source_type: str
     file_path: str
@@ -114,6 +115,7 @@ class SourceResponse(BaseModel):
 
 class SourceStatusResponse(BaseModel):
     source_id: int
+    workspace_id: Optional[str] = None
     name: str
     source_type: str
     status: str
@@ -123,6 +125,7 @@ class SourceStatusResponse(BaseModel):
 
 class UploadResponse(BaseModel):
     source_id: int
+    workspace_id: Optional[str] = None
     name: str
     source_type: str
     file_path: str
@@ -130,3 +133,48 @@ class UploadResponse(BaseModel):
     columns: List[str]
     sample_rows: List[Dict[str, Any]]
     suggested_mappings: Dict[str, Dict[str, Any]]
+    column_samples: Optional[Dict[str, List[str]]] = None
+
+
+# --- Workspace & Ingestion Session Schemas ---
+class WorkspaceBase(BaseModel):
+    name: str = Field(..., json_schema_extra={"example": "Q3 Enterprise Ingestion Session"})
+    description: Optional[str] = Field(None, json_schema_extra={"example": "Consolidated CRM and HR dumps for marketing outreach"})
+
+
+class WorkspaceCreate(BaseModel):
+    name: Optional[str] = Field(None, json_schema_extra={"example": "Session - 2026-09-24 00:54"})
+    description: Optional[str] = None
+
+
+class WorkspaceUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class WorkspaceResponse(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    total_sources: int = 0
+    total_records: int = 0
+    total_attributes_indexed: int = 0
+    master_entities: int = 0
+    links_discovered: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WorkspaceDetailResponse(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    sources: List[SourceResponse] = []
+    stats: Dict[str, Any] = {}
+
+    model_config = ConfigDict(from_attributes=True)
+

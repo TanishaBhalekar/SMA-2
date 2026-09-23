@@ -10,11 +10,15 @@ from backend.routes import api_router
 from backend.config import DATABASE_URL, GEMINI_API_KEY
 
 
+from backend.migrate import run_migration
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Ensure database tables exist on startup
-    Base.metadata.create_all(bind=engine)
+    # Ensure database tables and schema migrations exist on startup
+    run_migration()
     yield
+
 
 
 app = FastAPI(

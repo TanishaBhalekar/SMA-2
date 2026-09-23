@@ -24,6 +24,7 @@ if str(BASE_DIR) not in sys.path:
 from backend.config import DATABASE_URL, GEMINI_API_KEY
 from backend.database import engine, Base, SessionLocal
 from backend.models import (
+    Workspace,
     Source,
     SourceColumn,
     AttributeIndex,
@@ -31,6 +32,7 @@ from backend.models import (
     EntityAttribute,
     EnrichmentHop
 )
+
 from backend.services.ingestion import ingest_source
 from backend.services.enrichment_engine import progressive_enrich
 
@@ -121,9 +123,21 @@ def step_2_ingest_silos() -> Dict[str, int]:
     source_mapping = {}
 
     try:
+        # Create or ensure baseline workspace exists
+        baseline_ws = db.query(Workspace).filter_by(id="baseline-demo-session").first()
+        if not baseline_ws:
+            baseline_ws = Workspace(
+                id="baseline-demo-session",
+                name="Baseline Demo Session",
+                description="Migrated baseline demo session containing initial dataset silos."
+            )
+            db.add(baseline_ws)
+            db.commit()
+
         for silo in silos_config:
             file_path = data_dir / silo["name"]
             source = Source(
+                workspace_id=baseline_ws.id,
                 name=silo["name"],
                 source_type=silo["type"],
                 file_path=str(file_path),
@@ -134,6 +148,7 @@ def step_2_ingest_silos() -> Dict[str, int]:
             db.commit()
             db.refresh(source)
             source_mapping[silo["name"]] = source.id
+
 
             # Add confirmed column mappings
             for col_orig, (canon_field, is_id) in silo["columns"].items():

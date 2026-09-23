@@ -4,9 +4,13 @@ import MetricCards from './components/MetricCards';
 import DiscoveryExplorer from './components/DiscoveryExplorer';
 import SourceManager from './components/SourceManager';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
+import SessionHistoryDrawer from './components/SessionHistoryDrawer';
+import { WorkspaceProvider, useWorkspace } from './context/WorkspaceContext';
 import { api, detectActiveBackend } from './api/client';
 
-export default function App() {
+function AppContent() {
+  const { currentWorkspace } = useWorkspace();
+
   // Theme state persisted in localStorage
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem('theme');
@@ -30,20 +34,20 @@ export default function App() {
     }
   }, [darkMode]);
 
-  // Check backend connectivity and fetch stats
+  // Check backend connectivity and fetch stats for the current workspace
   const fetchStats = async () => {
     setLoadingStats(true);
     try {
       await detectActiveBackend();
-      const res = await api.getStats();
+      const res = await api.getStats(currentWorkspace?.id);
       if (res.data) {
         setStats({
-          total_sources: res.data.total_sources ?? 4,
-          sources_indexed: res.data.total_sources ?? 4,
-          total_attributes: res.data.total_attributes_indexed ?? res.data.total_attributes ?? 20400,
-          unique_normalized_values: res.data.indexed_records ?? 11400,
-          master_entities: res.data.master_entities ?? 1200,
-          multi_hop_links: res.data.links_discovered ?? 4800,
+          total_sources: res.data.total_sources ?? 0,
+          sources_indexed: res.data.total_sources ?? 0,
+          total_attributes: res.data.total_attributes_indexed ?? res.data.total_attributes ?? 0,
+          unique_normalized_values: res.data.indexed_records ?? 0,
+          master_entities: res.data.master_entities ?? 0,
+          multi_hop_links: res.data.links_discovered ?? 0,
         });
         setBackendOnline(true);
       }
@@ -57,11 +61,11 @@ export default function App() {
 
   useEffect(() => {
     fetchStats();
-  }, []);
+  }, [currentWorkspace?.id]);
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200">
-      {/* Global Header */}
+      {/* Global Header with Workspace Controls */}
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -72,7 +76,7 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* KPI Metric Bar */}
+        {/* KPI Metric Bar (Scoped to Active Session) */}
         <MetricCards
           stats={stats}
           loading={loadingStats}
@@ -80,10 +84,19 @@ export default function App() {
         />
 
         {/* View Switcher */}
-        {activeTab === 'search' && <DiscoveryExplorer />}
-        {activeTab === 'sources' && <SourceManager onSourcesChanged={fetchStats} />}
-        {activeTab === 'analytics' && <AnalyticsDashboard stats={stats} darkMode={darkMode} />}
+        {activeTab === 'search' && (
+          <DiscoveryExplorer onNavigateToSources={() => setActiveTab('sources')} />
+        )}
+        {activeTab === 'sources' && (
+          <SourceManager onSourcesChanged={fetchStats} />
+        )}
+        {activeTab === 'analytics' && (
+          <AnalyticsDashboard stats={stats} darkMode={darkMode} />
+        )}
       </main>
+
+      {/* Session History Sliding Drawer */}
+      <SessionHistoryDrawer />
 
       {/* Footer */}
       <footer className="mt-16 border-t border-slate-200 dark:border-slate-800/80 py-6 text-center text-xs text-slate-500 dark:text-slate-400">
@@ -93,7 +106,7 @@ export default function App() {
               PRJ-07: Unified Progressive Entity Resolution Engine
             </span>
             <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800">
-              v2.4-EAV
+              v2.5-Workspaces
             </span>
           </div>
           <div>
@@ -104,3 +117,12 @@ export default function App() {
     </div>
   );
 }
+
+export default function App() {
+  return (
+    <WorkspaceProvider>
+      <AppContent />
+    </WorkspaceProvider>
+  );
+}
+

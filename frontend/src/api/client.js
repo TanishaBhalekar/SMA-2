@@ -54,22 +54,44 @@ apiClient.interceptors.response.use(
 );
 
 export const api = {
-  // Stats
-  getStats: () => apiClient.get('/api/stats'),
+  // Stats (supports optional workspaceId)
+  getStats: (workspaceId = null) =>
+    apiClient.get('/api/stats', { params: workspaceId ? { workspace_id: workspaceId } : {} }),
   getHealth: () => apiClient.get('/api/health'),
 
-  // Sources
-  listSources: () => apiClient.get('/api/sources'),
-  uploadSource: (formData) =>
-    apiClient.post('/api/sources/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }),
+  // Workspaces / Ingestion Sessions
+  listWorkspaces: () => apiClient.get('/api/workspaces'),
+  getWorkspace: (id) => apiClient.get(`/api/workspaces/${id}`),
+  getWorkspaceStats: (id) => apiClient.get(`/api/workspaces/${id}/stats`),
+  resolveWorkspace: (id) => apiClient.post(`/api/workspaces/${id}/resolve`),
+  createWorkspace: (data = {}) => apiClient.post('/api/workspaces', data),
+  updateWorkspace: (id, data) => apiClient.patch(`/api/workspaces/${id}`, data),
+  deleteWorkspace: (id) => apiClient.delete(`/api/workspaces/${id}`),
+
+  // Sources (scoped by workspaceId)
+  listSources: (workspaceId = null) =>
+    apiClient.get('/api/sources', { params: workspaceId ? { workspace_id: workspaceId } : {} }),
+  uploadSource: (formData, workspaceId = null) => {
+    const headers = { 'Content-Type': 'multipart/form-data' };
+    if (workspaceId) {
+      headers['X-Workspace-Id'] = workspaceId;
+    }
+    return apiClient.post('/api/sources/upload', formData, { headers });
+  },
   confirmMapping: (sourceId, mappings) =>
     apiClient.post(`/api/sources/${sourceId}/confirm-mapping`, { mappings }),
   getSourceStatus: (sourceId) => apiClient.get(`/api/sources/${sourceId}/status`),
+  deleteSource: (sourceId) => apiClient.delete(`/api/sources/${sourceId}`),
 
-  // Entities & Progressive Discovery
-  searchEntity: (field, value) =>
-    apiClient.get('/api/entities/search', { params: { field, value } }),
+  // Entities & Progressive Discovery (scoped by workspaceId)
+  searchEntity: (field, value, workspaceId = null) =>
+    apiClient.get('/api/entities/search', {
+      params: {
+        field,
+        value,
+        ...(workspaceId ? { workspace_id: workspaceId } : {}),
+      },
+    }),
   getEntityDetails: (entityId) => apiClient.get(`/api/entities/${entityId}`),
 };
+

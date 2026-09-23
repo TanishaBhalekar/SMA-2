@@ -36,12 +36,13 @@ router = APIRouter()
 def search_and_enrich_entity(
     field: str = Query(..., description="Seed attribute field name (e.g. 'full_name', 'email', 'phone', 'name')"),
     value: str = Query(..., description="Seed attribute search value (e.g. 'John Doe', '9876543210')"),
+    workspace_id: Optional[str] = Query(None, description="Optional active workspace session filter"),
     db: Session = Depends(get_db)
 ):
     """
     Executes iterative BFS graph discovery starting from an initial anchor seed attribute.
-    Traverses cross-silo identifiers and outputs the consolidated 360-degree profile,
-    source provenance lineage, and step-by-step discovery timeline.
+    Traverses cross-silo identifiers within the active workspace session and outputs
+    the consolidated 360-degree profile, source provenance lineage, and step-by-step discovery timeline.
     """
     if not field.strip() or not value.strip():
         raise HTTPException(
@@ -49,7 +50,7 @@ def search_and_enrich_entity(
             detail="Query parameters 'field' and 'value' cannot be empty."
         )
 
-    result = progressive_enrich(seed_field=field, seed_value=value, db=db)
+    result = progressive_enrich(seed_field=field, seed_value=value, db=db, workspace_id=workspace_id)
     if result.get("status") == "not_found":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -60,23 +61,54 @@ def search_and_enrich_entity(
 
 
 @router.get("/stats")
-def get_entity_repository_stats(db: Session = Depends(get_db)):
+def get_entity_repository_stats(
+    workspace_id: Optional[str] = Query(None, description="Optional workspace session filter"),
+    db: Session = Depends(get_db)
+):
     """
-    Returns global repository metrics across all operational silos.
+    Returns repository metrics, optionally isolated to a specific workspace session.
+    Automatically resolves disjoint clusters if sources have been indexed but clusters are not yet persisted.
     """
-    total_sources = db.query(Source).count()
-    indexed_records = db.query(func.coalesce(func.sum(Source.record_count), 0)).scalar() or 0
-    total_attributes_indexed = db.query(AttributeIndex).count()
-    master_entities = db.query(MasterEntity).count()
-    links_discovered = db.query(EnrichmentHop).count()
+    from backend.services.enrichment_engine import resolve_workspace_entities
+
+    if workspace_id:
+        total_sources = db.query(Source).filter_by(workspace_id=workspace_id).count()
+        indexed_records = db.query(func.coalesce(func.sum(Source.record_count), 0)).filter(
+            Source.workspace_id == workspace_id
+        ).scalar() or 0
+        total_attributes_indexed = db.query(AttributeIndex).filter_by(workspace_id=workspace_id).count()
+        master_entities = db.query(MasterEntity).filter_by(workspace_id=workspace_id).count()
+
+        if total_attributes_indexed > 0 and master_entities == 0:
+            resolve_workspace_entities(workspace_id=workspace_id, db=db)
+            master_entities = db.query(MasterEntity).filter_by(workspace_id=workspace_id).count()
+
+        links_discovered = db.query(EnrichmentHop).join(
+            MasterEntity, EnrichmentHop.entity_id == MasterEntity.id
+        ).filter(MasterEntity.workspace_id == workspace_id).count()
+    else:
+        total_sources = db.query(Source).count()
+        indexed_records = db.query(func.coalesce(func.sum(Source.record_count), 0)).scalar() or 0
+        total_attributes_indexed = db.query(AttributeIndex).count()
+        master_entities = db.query(MasterEntity).count()
+
+        if total_attributes_indexed > 0 and master_entities == 0:
+            distinct_ws = [r[0] for r in db.query(AttributeIndex.workspace_id).distinct().all() if r[0]]
+            for ws in distinct_ws:
+                resolve_workspace_entities(workspace_id=ws, db=db)
+            master_entities = db.query(MasterEntity).count()
+
+        links_discovered = db.query(EnrichmentHop).count()
 
     return {
         "total_sources": total_sources,
         "indexed_records": int(indexed_records),
         "total_attributes_indexed": total_attributes_indexed,
         "master_entities": master_entities,
-        "links_discovered": links_discovered
+        "links_discovered": links_discovered,
+        "multi_hop_links": links_discovered
     }
+
 
 
 @router.get("/{entity_id}")
@@ -130,12 +162,16 @@ def get_master_entity_details(
         for h in entity.hops
     ]
 
+    from backend.services.enrichment_engine import select_authoritative_profile
+    authoritative_profile = select_authoritative_profile(attributes_list)
+
     return {
         "id": entity.id,
         "canonical_name": entity.canonical_name,
         "created_at": entity.created_at.isoformat() if entity.created_at else None,
         "updated_at": entity.updated_at.isoformat() if entity.updated_at else None,
         "consolidated_attributes": consolidated,
+        "authoritative_profile": authoritative_profile,
         "attributes": attributes_list,
         "hops": hops_list,
         "total_attributes": len(attributes_list),
