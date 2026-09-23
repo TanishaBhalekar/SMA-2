@@ -7,25 +7,11 @@ import GeminiAccordion from './GeminiAccordion';
 
 export default function DiscoveryExplorer() {
   const [identifierType, setIdentifierType] = useState('email');
-  const [identifierValue, setIdentifierValue] = useState('john@example.com');
+  const [identifierValue, setIdentifierValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [discoveryResult, setDiscoveryResult] = useState(null);
-  const [executedSeed, setExecutedSeed] = useState({ field: 'email', value: 'john@example.com' });
-
-  // Quick fill samples for examiners/viva demo
-  const sampleSeeds = [
-    { label: 'Demo: john@example.com', type: 'email', value: 'john@example.com' },
-    { label: 'Demo: 9876543210', type: 'phone', value: '9876543210' },
-    { label: 'Demo: johndoe', type: 'username', value: 'johndoe' },
-    { label: 'Demo: M1042', type: 'member_id', value: 'M1042' },
-  ];
-
-  const handleQuickFill = (sample) => {
-    setIdentifierType(sample.type);
-    setIdentifierValue(sample.value);
-    triggerSearch(sample.type, sample.value);
-  };
+  const [executedSeed, setExecutedSeed] = useState({ field: 'email', value: '' });
 
   const triggerSearch = async (fieldType = identifierType, val = identifierValue) => {
     if (!val.trim()) return;
@@ -55,32 +41,14 @@ export default function DiscoveryExplorer() {
     <div>
       {/* Search Control Bar */}
       <div className="rounded-2xl p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm mb-8">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-          <div>
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
-              <Search className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-              Progressive Discovery Explorer
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Enter any single fragmented anchor identifier to trigger automated cross-silo graph traversal
-            </p>
-          </div>
-          {/* Quick-fill pills */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-medium text-slate-400 dark:text-slate-500 mr-1">
-              Presets:
-            </span>
-            {sampleSeeds.map((s, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => handleQuickFill(s)}
-                className="px-2.5 py-1 rounded-full text-xs font-mono font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-950/60 dark:hover:text-indigo-300 border border-slate-200 dark:border-slate-700 transition-colors"
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
+        <div className="mb-4">
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+            <Search className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+            Progressive Discovery Explorer
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            Enter any single fragmented anchor identifier to trigger automated cross-silo graph traversal
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row items-stretch gap-3">
@@ -150,7 +118,7 @@ export default function DiscoveryExplorer() {
             <div className="font-semibold">Entity Resolution Unsuccessful</div>
             <div className="text-xs mt-0.5">{error}</div>
             <div className="text-xs mt-2 text-slate-600 dark:text-slate-400">
-              💡 Tip: Click one of the "Demo" quick-fill presets above to explore pre-indexed entities.
+              💡 Tip: Verify the identifier type and value entered, or ensure the records have been indexed.
             </div>
           </div>
         </div>
