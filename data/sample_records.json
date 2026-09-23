@@ -1,0 +1,57 @@
+[
+  {
+    "source_name": "crm_salesforce",
+    "external_id": "SF-1001",
+    "payload": {
+      "name": "Jonathan Doe",
+      "email": "jdoe@techcorp.io",
+      "phone": "+1-555-0199",
+      "company": "TechCorp Systems",
+      "city": "San Francisco"
+    }
+  },
+  {
+    "source_name": "billing_stripe",
+    "external_id": "STRIPE-9281",
+    "payload": {
+      "name": "John Doe",
+      "email": "jdoe@techcorp.io",
+      "phone": "555-0199",
+      "company": "TechCorp",
+      "city": "San Francisco"
+    }
+  },
+  {
+    "source_name": "support_zendesk",
+    "external_id": "ZD-5541",
+    "payload": {
+      "name": "J. Doe",
+      "email": "john.doe.personal@gmail.com",
+      "phone": "+1-555-0199",
+      "company": "Tech Corp Inc",
+      "city": "SF"
+    }
+  },
+  {
+    "source_name": "event_registration",
+    "external_id": "EV-3312",
+    "payload": {
+      "name": "Eleanor Vance",
+      "email": "e.vance@hillhouse.org",
+      "phone": "+1-555-0344",
+      "company": "Hill House Heritage",
+      "city": "Boston"
+    }
+  },
+  {
+    "source_name": "crm_hubspot",
+    "external_id": "HS-4490",
+    "payload": {
+      "name": "Elinor Vance",
+      "email": "evance@hillhouse.org",
+      "phone": "+1-555-0344",
+      "company": "Hill House",
+      "city": "Boston, MA"
+    }
+  }
+]
