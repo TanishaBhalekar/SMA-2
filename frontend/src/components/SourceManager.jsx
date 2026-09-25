@@ -343,11 +343,20 @@ export default function SourceManager({ onSourcesChanged }) {
   const handleDeleteSource = async (sourceId, sourceName) => {
     if (!window.confirm(`Are you sure you want to remove "${sourceName}" from this session?`)) return;
     try {
-      await api.deleteSource(sourceId);
-      await fetchSources();
+      const res = await api.deleteSource(sourceId);
+      if (res?.status === 200 || res?.data?.status === 'deleted') {
+        // Immediately remove row from the UI table on success
+        setSources((prev) => prev.filter((s) => s.id !== sourceId));
+        if (expandedSourceId === sourceId) {
+          setExpandedSourceId(null);
+        }
+        if (onSourcesChanged) onSourcesChanged();
+        refreshWorkspaces();
+      }
     } catch (err) {
       console.error('Failed to remove source:', err);
-      alert('Failed to remove source.');
+      alert('Failed to remove source: ' + (err.response?.data?.detail || err.message));
+      fetchSources();
     }
   };
 

@@ -249,9 +249,9 @@ def resolve_workspace_entities(workspace_id: str, db: Session) -> Dict[str, Any]
         rec_key = (attr.source_id, attr.record_index)
         rec_attrs[rec_key].append(attr)
 
-        # Only whitelisted identifiers form match edges
-        is_ident = attr.is_identifier or (attr.canonical_field in MATCH_IDENTIFIER_FIELDS)
-        if is_ident and (attr.canonical_field in MATCH_IDENTIFIER_FIELDS) and (attr.canonical_field != "source_record_id"):
+        # Only whitelisted identifiers with is_identifier=True form match edges
+        is_ident = attr.is_identifier and (attr.canonical_field in MATCH_IDENTIFIER_FIELDS) and (attr.canonical_field != "source_record_id")
+        if is_ident:
             norm_val = (attr.normalized_value or attr.original_value or "").strip()
             if norm_val:
                 ident_to_records[(attr.canonical_field, norm_val)].append(rec_key)
@@ -479,6 +479,12 @@ def progressive_enrich(
 
         if attr_match:
             target_entity = db.query(MasterEntity).filter_by(id=attr_match.entity_id).first()
+        elif canonical_seed_field == "name":
+            clean_s = seed_value.strip().lower()
+            target_entity = db.query(MasterEntity).filter(
+                MasterEntity.workspace_id == workspace_id,
+                func.lower(MasterEntity.canonical_name).contains(clean_s)
+            ).first()
 
         # If found precomputed MasterEntity, build profile directly from its resolved cluster
         if target_entity:
@@ -716,6 +722,50 @@ def progressive_enrich(
         lineage=lineage_records,
         sources_cache=sources_cache
     )
+
+    now_utc = datetime.now(timezone.utc)
+    master_entity = MasterEntity(
+        id=entity_id,
+        workspace_id=workspace_id,
+        canonical_name=master_name,
+        created_at=now_utc,
+        updated_at=now_utc
+    )
+    db.add(master_entity)
+    db.flush()
+
+    unique_attrs: Dict[Tuple[int, int, str, str], Dict[str, Any]] = {}
+    for attr in collected_attributes:
+        ukey = (attr["source_id"], attr["record_index"], attr["canonical_field"], str(attr["original_value"]))
+        unique_attrs[ukey] = attr
+
+    ent_attr_objs = [
+        EntityAttribute(
+            entity_id=entity_id,
+            source_id=attr["source_id"],
+            record_index=attr["record_index"],
+            canonical_field=attr["canonical_field"],
+            original_value=attr["original_value"],
+            normalized_value=attr["normalized_value"],
+            is_identifier=attr["is_identifier"]
+        )
+        for attr in unique_attrs.values()
+    ]
+    db.add_all(ent_attr_objs)
+
+    for hop_item in discovery_hops:
+        hop_obj = EnrichmentHop(
+            entity_id=entity_id,
+            step_order=hop_item["step_order"],
+            source_id=hop_item["source_id"],
+            matched_field=hop_item["matched_field"],
+            matched_value=str(hop_item["matched_value"]),
+            discovered_field=hop_item["discovered_field"],
+            discovered_value=str(hop_item["discovered_value"])
+        )
+        db.add(hop_obj)
+
+    db.commit()
 
     return {
         "entity": {

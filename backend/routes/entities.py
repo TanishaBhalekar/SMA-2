@@ -83,9 +83,8 @@ def get_entity_repository_stats(
             resolve_workspace_entities(workspace_id=workspace_id, db=db)
             master_entities = db.query(MasterEntity).filter_by(workspace_id=workspace_id).count()
 
-        links_discovered = db.query(EnrichmentHop).join(
-            MasterEntity, EnrichmentHop.entity_id == MasterEntity.id
-        ).filter(MasterEntity.workspace_id == workspace_id).count()
+        from backend.services.enrichment_engine import count_cross_source_links
+        links_discovered = count_cross_source_links(workspace_id, db)
     else:
         total_sources = db.query(Source).count()
         indexed_records = db.query(func.coalesce(func.sum(Source.record_count), 0)).scalar() or 0
@@ -98,7 +97,9 @@ def get_entity_repository_stats(
                 resolve_workspace_entities(workspace_id=ws, db=db)
             master_entities = db.query(MasterEntity).count()
 
-        links_discovered = db.query(EnrichmentHop).count()
+        from backend.services.enrichment_engine import count_cross_source_links
+        distinct_ws = [r[0] for r in db.query(AttributeIndex.workspace_id).distinct().all() if r[0]]
+        links_discovered = sum(count_cross_source_links(ws, db) for ws in distinct_ws) if distinct_ws else 0
 
     return {
         "total_sources": total_sources,

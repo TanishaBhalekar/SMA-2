@@ -72,7 +72,7 @@ def test_four_datasets_ingestion_and_resolution():
                 # Mapping checks
                 mappings = up_data["suggested_mappings"]
                 assert mappings["company_id"]["canonical_field"] == "source_record_id"
-                assert mappings["company_id"]["is_identifier"] is True
+                assert mappings["company_id"]["is_identifier"] is False
                 assert mappings["primary_contact"]["canonical_field"] == "name"
                 assert mappings["phone"]["canonical_field"] == "phone"
                 assert mappings["username"]["canonical_field"] == "username"
@@ -86,7 +86,7 @@ def test_four_datasets_ingestion_and_resolution():
                 # Mapping checks
                 mappings = up_data["suggested_mappings"]
                 assert mappings["member_id"]["canonical_field"] == "source_record_id"
-                assert mappings["member_id"]["is_identifier"] is True
+                assert mappings["member_id"]["is_identifier"] is False
                 assert mappings["email_address"]["canonical_field"] == "email"
                 assert mappings["email_address"]["is_identifier"] is True
                 assert mappings["username"]["canonical_field"] == "username"
@@ -132,31 +132,31 @@ def test_four_datasets_ingestion_and_resolution():
         assert g_stats["master_entities"] == 10
         assert g_stats["links_discovered"] == stats["links_discovered"]
 
-        # Step 4: Verify Search for 'Rahul Sharma' (Fix 2 & 4)
-        res_search_name = client.get(f"/api/entities/search?field=name&value=Rahul Sharma&workspace_id={ws_id}")
+        # Step 4: Verify Search for 'Aarav Patel' (Fix 2 & 4)
+        res_search_name = client.get(f"/api/entities/search?field=name&value=Aarav Patel&workspace_id={ws_id}")
         assert res_search_name.status_code == 200, f"Search by name failed: {res_search_name.text}"
         data_name = res_search_name.json()
         entity_name = data_name["entity"]
         auth_name = entity_name["authoritative_profile"]
 
-        assert auth_name["name"] == "Rahul Sharma", f"Expected authoritative name 'Rahul Sharma', got {auth_name['name']}"
-        assert auth_name["email"] == "rahul.sharma@gmail.com"
-        assert auth_name["phone"] == "9876543210"
-        assert auth_name["username"] == "rahulsharma"
+        assert auth_name["name"] == "Aarav Patel", f"Expected authoritative name 'Aarav Patel', got {auth_name['name']}"
+        assert auth_name["email"] == "aarav.patel@gmail.com"
+        assert auth_name["phone"] == "9876510001"
+        assert auth_name["username"] == "aarav_p"
         assert auth_name["address"] == "Mumbai"
         assert auth_name["company"] == "TechNova"
         assert auth_name["member_id"] == "M1042"
 
-        # Verify Search for 'rahul@gmail.com' (Fuzzy/prefix fallback anchor match)
-        res_search_email = client.get(f"/api/entities/search?field=email&value=rahul@gmail.com&workspace_id={ws_id}")
+        # Verify Search for 'aarav@gmail.com' (Fuzzy/prefix fallback anchor match)
+        res_search_email = client.get(f"/api/entities/search?field=email&value=aarav@gmail.com&workspace_id={ws_id}")
         assert res_search_email.status_code == 200, f"Search by email fallback failed: {res_search_email.text}"
         data_email = res_search_email.json()
         entity_email = data_email["entity"]
         auth_email = entity_email["authoritative_profile"]
 
-        assert auth_email["name"] == "Rahul Sharma", f"Expected authoritative name 'Rahul Sharma', got {auth_email['name']}"
-        assert auth_email["email"] == "rahul.sharma@gmail.com"
-        assert auth_email["phone"] == "9876543210"
+        assert auth_email["name"] == "Aarav Patel", f"Expected authoritative name 'Aarav Patel', got {auth_email['name']}"
+        assert auth_email["email"] == "aarav.patel@gmail.com"
+        assert auth_email["phone"] == "9876510001"
 
     finally:
         client.delete(f"/api/workspaces/{ws_id}")

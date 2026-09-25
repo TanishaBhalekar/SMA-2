@@ -1,0 +1,5 @@
+record_id,name,email,phone,username,address
+E101,Aarav,aarav.patel@gmail.com,+919876510001,aarav_p,Mumbai
+E102,Priya,priya.shah@gmail.com,9988776655,priyashah,Pune
+E103,Amit,amit.patil@gmail.com,+91 98765 30003,amitpatil,Nashik
+E104,Devendra Verma,devendra.verma@example.com,+91 98765 40004,devendra_v,Bhopal

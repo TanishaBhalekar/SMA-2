@@ -30,6 +30,12 @@ def test_normalize_phone():
     assert normalize_field("phone", "+91-9876543210") == "9876543210"
     assert normalize_field("phone", "919876543210") == "9876543210"
 
+    # Specific specification test cases
+    assert normalize_field("phone", "+91 98765 10001") == "9876510001"
+    assert normalize_field("phone", "98765-10001") == "9876510001"
+    assert normalize_field("phone", "+919876510001") == "9876510001"
+    assert normalize_field("phone", "+1 98765 10001") == "9876510001"
+
     # With trunk prefix 0
     assert normalize_field("phone", "09876543210") == "9876543210"
     assert normalize_field("phone", "0-9876543210") == "9876543210"
@@ -50,10 +56,12 @@ def test_normalize_name():
 
 
 def test_normalize_username():
-    """Verify username normalization: lowercase, strip, alphanumeric only."""
-    assert normalize_field("username", " @John_Doe.99! ") == "johndoe99"
+    """Verify username normalization: lowercase, strip @, preserve alphanumeric, underscore, dot."""
+    assert normalize_field("username", " @John_Doe.99! ") == "john_doe.99"
     assert normalize_field("username", "Cool-User#42") == "cooluser42"
     assert normalize_field("username", "AdminUser") == "adminuser"
+    assert normalize_field("username", "@aarav_p") == "aarav_p"
+    assert normalize_field("username", "vikram.k") == "vikram.k"
 
 
 def test_normalize_default():

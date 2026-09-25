@@ -47,10 +47,8 @@ def _get_workspace_stats(db: Session, workspace_id: str) -> dict:
         resolve_workspace_entities(workspace_id=workspace_id, db=db)
         master_entities = db.query(MasterEntity).filter_by(workspace_id=workspace_id).count()
 
-    # Query hops for master entities belonging to this workspace
-    links_discovered = db.query(EnrichmentHop).join(
-        MasterEntity, EnrichmentHop.entity_id == MasterEntity.id
-    ).filter(MasterEntity.workspace_id == workspace_id).count()
+    from backend.services.enrichment_engine import count_cross_source_links
+    links_discovered = count_cross_source_links(workspace_id, db)
 
     return {
         "total_sources": total_sources,

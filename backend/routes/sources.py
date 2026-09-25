@@ -13,10 +13,19 @@ from fastapi import (
     APIRouter, Depends, HTTPException, UploadFile, File, Form, Header, Query,
     BackgroundTasks, status
 )
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.database import get_db, SessionLocal
-from backend.models import Source, SourceColumn
+from backend.models import (
+    Source,
+    SourceColumn,
+    AttributeIndex,
+    EntityAttribute,
+    EnrichmentHop,
+    MasterEntity,
+    RawRecord
+)
 from backend.services.field_mapper import suggest_mappings
 from backend.services.ingestion import inspect_file_schema, extract_column_samples, ingest_source
 from backend.services.enrichment_engine import resolve_workspace_entities
@@ -232,7 +241,8 @@ def delete_source(
 ):
     """
     Deletes an individual operational source, unlinks its stored file,
-    and removes its indexed attributes from the repository.
+    cascades deletion across attributes, raw records, mappings, and source entity,
+    and automatically re-triggers graph re-clustering for the active workspace.
     """
     source = db.query(Source).filter_by(id=source_id).first()
     if not source:
@@ -241,20 +251,78 @@ def delete_source(
             detail=f"Source with id={source_id} not found."
         )
 
-    # 1. Remove physical file
+    workspace_id = source.workspace_id
+    source_name = source.name
+    file_path = source.file_path
+
+    # Remove physical file from disk if present
     try:
-        if source.file_path and os.path.exists(source.file_path):
-            os.remove(source.file_path)
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
     except Exception:
         pass
 
-    # 2. Delete source record (cascades to source_columns and attribute_indices)
+    # 1. Cascade Deletion:
+    # 1a. Delete all rows in attribute_index where source_id == source_id
+    db.query(AttributeIndex).filter(AttributeIndex.source_id == source_id).delete(synchronize_session=False)
+    db.query(EntityAttribute).filter(EntityAttribute.source_id == source_id).delete(synchronize_session=False)
+    db.query(EnrichmentHop).filter(EnrichmentHop.source_id == source_id).delete(synchronize_session=False)
+
+    # 1b. Delete all rows in raw_records (if applicable) where source_id == source_id
+    try:
+        if hasattr(RawRecord, "source_id"):
+            db.query(RawRecord).filter(getattr(RawRecord, "source_id") == source_id).delete(synchronize_session=False)
+        elif hasattr(RawRecord, "source_name") and source_name:
+            db.query(RawRecord).filter(RawRecord.source_name == source_name).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    try:
+        db.execute(text("DELETE FROM raw_records WHERE source_id = :sid"), {"sid": source_id})
+    except Exception:
+        pass
+
+    # 1c. Delete any source_mappings tied to that source_id
+    db.query(SourceColumn).filter(SourceColumn.source_id == source_id).delete(synchronize_session=False)
+    try:
+        db.execute(text("DELETE FROM source_mappings WHERE source_id = :sid"), {"sid": source_id})
+    except Exception:
+        pass
+
+    # 1d. Delete the Source record itself
     db.delete(source)
+
+    # 1e. Commit the deletion transaction
     db.commit()
+
+    # 2. Trigger Graph Re-Clustering for the remaining sources in that active workspace
+    resolution_res = {}
+    updated_stats = {}
+    if workspace_id:
+        remaining_count = db.query(Source).filter_by(workspace_id=workspace_id).count()
+        if remaining_count == 0:
+            # If no sources remain, purge all remaining entities, attributes, and hops for this workspace
+            prior_entities = db.query(MasterEntity).filter_by(workspace_id=workspace_id).all()
+            prior_ids = [e.id for e in prior_entities]
+            if prior_ids:
+                db.query(EntityAttribute).filter(EntityAttribute.entity_id.in_(prior_ids)).delete(synchronize_session=False)
+                db.query(EnrichmentHop).filter(EnrichmentHop.entity_id.in_(prior_ids)).delete(synchronize_session=False)
+                db.query(MasterEntity).filter(MasterEntity.workspace_id == workspace_id).delete(synchronize_session=False)
+                db.commit()
+            resolution_res = {"master_entities": 0, "links_discovered": 0, "multi_hop_links": 0}
+        else:
+            from backend.services.enrichment_engine import resolve_workspace_entities
+            resolution_res = resolve_workspace_entities(workspace_id=workspace_id, db=db)
+
+        from backend.routes.workspaces import _get_workspace_stats
+        updated_stats = _get_workspace_stats(db, workspace_id)
 
     return {
         "status": "deleted",
         "source_id": source_id,
-        "message": f"Source '{source.name}' successfully removed."
+        "workspace_id": workspace_id,
+        "message": f"Source '{source_name}' successfully removed and graph re-clustered.",
+        "resolution": resolution_res,
+        "stats": updated_stats
     }
 
