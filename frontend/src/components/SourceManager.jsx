@@ -23,7 +23,7 @@ const CANONICAL_OPTIONS = [
 ];
 
 export default function SourceManager({ onSourcesChanged }) {
-  const { currentWorkspace, refreshWorkspaces } = useWorkspace();
+  const { currentWorkspace, refreshWorkspaces, ensurePersistedWorkspace } = useWorkspace();
 
   const [sources, setSources] = useState([]);
   const [loadingSources, setLoadingSources] = useState(false);
@@ -47,7 +47,10 @@ export default function SourceManager({ onSourcesChanged }) {
 
   // Fetch existing sources scoped to the active workspace session
   const fetchSources = async () => {
-    if (!currentWorkspace?.id) return;
+    if (!currentWorkspace?.id || currentWorkspace?.isDraft) {
+      setSources([]);
+      return;
+    }
     setLoadingSources(true);
     try {
       const res = await api.listSources(currentWorkspace.id);
@@ -154,14 +157,20 @@ export default function SourceManager({ onSourcesChanged }) {
     });
 
     try {
+      // Lazily persist the draft session into SQLite upon first file upload
+      let activeWs = currentWorkspace;
+      if (!activeWs?.id || activeWs?.isDraft) {
+        activeWs = await ensurePersistedWorkspace();
+      }
+
       const formData = new FormData();
       formData.append('file', file);
       formData.append('source_type', ext.toUpperCase());
-      if (currentWorkspace?.id) {
-        formData.append('workspace_id', currentWorkspace.id);
+      if (activeWs?.id) {
+        formData.append('workspace_id', activeWs.id);
       }
 
-      const res = await api.uploadSource(formData, currentWorkspace?.id);
+      const res = await api.uploadSource(formData, activeWs?.id);
       const data = res.data;
 
       // Extract mappings from suggested_mappings
@@ -355,9 +364,16 @@ export default function SourceManager({ onSourcesChanged }) {
               <span className="text-xs text-indigo-700 dark:text-indigo-300 font-semibold uppercase tracking-wider">
                 Active Session
               </span>
-              <span className="font-bold text-sm text-slate-900 dark:text-white">
-                {currentWorkspace?.name || 'Loading Session...'}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-sm text-slate-900 dark:text-white">
+                  {currentWorkspace?.name || 'Loading Session...'}
+                </span>
+                {currentWorkspace?.isDraft && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                    Draft (Unsaved)
+                  </span>
+                )}
+              </div>
             </div>
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
               {sources.length} {sources.length === 1 ? 'source' : 'sources'} ingested • Drop 1, 2, 5, or 10+ arbitrary CSV/SQL files
@@ -641,7 +657,7 @@ export default function SourceManager({ onSourcesChanged }) {
             </h3>
           </div>
           <span className="text-xs text-slate-400 font-mono">
-            Session ID: {currentWorkspace?.id || '—'}
+            Session ID: {currentWorkspace?.id || 'Draft (Pending First Upload)'}
           </span>
         </div>
 

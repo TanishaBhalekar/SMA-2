@@ -24,8 +24,9 @@ CANONICAL_FIELDS = [
     "loyalty_tier"
 ]
 
-# High-priority identifier attributes for progressive entity resolution
-IDENTIFIER_FIELDS = {"email", "phone", "username", "source_record_id", "member_id"}
+# High-priority whitelisted default identifier attributes for progressive entity resolution.
+# source_record_id (e.g. customer_id, client_id, member_id, rep_id) is strictly is_identifier=False.
+IDENTIFIER_FIELDS = {"email", "phone", "username"}
 
 # Rule-based synonym dictionary for deterministic fast-path mapping
 SYNONYM_MAP = {

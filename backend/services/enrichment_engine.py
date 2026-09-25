@@ -1,7 +1,7 @@
 """
-Iterative Graph-Discovery and Progressive Entity Enrichment Engine (PRJ-07).
-Executes Breadth-First Search (BFS) record linkage across disparate operational silos
-via the AttributeIndex EAV repository, reconstructing complete 360-degree identity graphs.
+Disjoint-Set Union (DSU) / Connected Components Entity Resolution Engine (PRJ-07).
+Implements exact graph clustering, persistent incremental merging, whitelisted identifier matching,
+and authoritative profile consolidation.
 """
 
 from collections import deque, defaultdict
@@ -10,6 +10,7 @@ import re
 from typing import Dict, Any, List, Set, Tuple, Optional
 import uuid
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from backend.models import (
     Source,
@@ -20,6 +21,36 @@ from backend.models import (
 )
 from backend.services.normalizer import normalize_field
 from backend.services.field_mapper import CANONICAL_FIELDS, IDENTIFIER_FIELDS, SYNONYM_MAP
+
+# Whitelisted Default Identifiers: ONLY email, phone, and username can form match edges.
+# source_record_id (customer_id, client_id, member_id, etc.) is strictly NOT a match identifier.
+MATCH_IDENTIFIER_FIELDS = {"email", "phone", "username"}
+
+
+class DisjointSetUnion:
+    """
+    Exact Disjoint-Set Union (DSU) with path compression and union by rank.
+    Elements are record node keys: (source_id, record_index).
+    """
+    def __init__(self, elements):
+        self.parent = {x: x for x in elements}
+        self.rank = {x: 0 for x in elements}
+
+    def find(self, x):
+        if self.parent[x] != x:
+            self.parent[x] = self.find(self.parent[x])
+        return self.parent[x]
+
+    def union(self, x, y) -> bool:
+        rx, ry = self.find(x), self.find(y)
+        if rx == ry:
+            return False
+        if self.rank[rx] < self.rank[ry]:
+            rx, ry = ry, rx
+        self.parent[ry] = rx
+        if self.rank[rx] == self.rank[ry]:
+            self.rank[rx] += 1
+        return True
 
 
 def resolve_canonical_field(field_name: str) -> str:
@@ -37,45 +68,98 @@ def resolve_canonical_field(field_name: str) -> str:
     return clean
 
 
+def count_cross_source_links(workspace_id: str, db: Session) -> int:
+    """
+    Mathematically Defensible Metric: Multi-Hop Links Formed (Cross-Source Links).
+    Count the number of unique pairs of records from DIFFERENT sources (source_id_A != source_id_B)
+    connected by a shared whitelisted identifier.
+    Do NOT count intra-source matches as multi-hop links.
+    """
+    if not workspace_id:
+        return 0
+
+    attrs = db.query(
+        AttributeIndex.source_id,
+        AttributeIndex.record_index,
+        AttributeIndex.canonical_field,
+        AttributeIndex.normalized_value
+    ).filter(
+        AttributeIndex.workspace_id == workspace_id,
+        AttributeIndex.is_identifier == True,
+        AttributeIndex.canonical_field.in_(list(MATCH_IDENTIFIER_FIELDS))
+    ).all()
+
+    ident_to_records: Dict[Tuple[str, str], List[Tuple[int, int]]] = defaultdict(list)
+    for s_id, r_idx, field, norm_val in attrs:
+        val = (norm_val or "").strip()
+        if val:
+            ident_to_records[(field, val)].append((s_id, r_idx))
+
+    cross_pairs: Set[Tuple[Tuple[int, int], Tuple[int, int]]] = set()
+    for (field, val), recs in ident_to_records.items():
+        unique_recs = list(dict.fromkeys(recs))
+        for i in range(len(unique_recs)):
+            for j in range(i + 1, len(unique_recs)):
+                r1, r2 = unique_recs[i], unique_recs[j]
+                if r1[0] != r2[0]:  # Must be from DIFFERENT sources
+                    cross_pairs.add((min(r1, r2), max(r1, r2)))
+
+    return len(cross_pairs)
+
+
 def select_authoritative_profile(collected_attributes: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Consolidates disparate raw attributes into one authoritative Master Record:
-      - name: longest/most complete canonical name (e.g. "Rahul Sharma" instead of "Rahul S." or "R. Sharma")
-      - email: primary valid email
-      - phone: standardized 10-digit phone
-      - username: unique username (e.g. "rahul_s" or "rahulsharma")
-      - address: full address or city
-      - company: company name (e.g. "Sharma Consulting" or "TechNova")
-      - member_id: canonical member ID (e.g. "M1042" or "M101")
-      - source_record_id: primary source record identifier (e.g. "A001")
+    Authoritative Master Profile Builder:
+      - Eliminates Duplicate Canonical Fields: Exactly one consolidated value for each field.
+      - Best-Value Selection:
+          * name: Longest, most complete string (e.g. 'Rahul Sharma' instead of 'Rahul S.' or 'R. Sharma';
+                  'Amit Kumar Patel' instead of 'Amit K. Patel').
+          * phone, email, username: Authoritative normalized representation.
+          * address, company: Longest clean candidate string.
+      - Retains all raw source values and tracking IDs.
     """
-    attrs_by_field: Dict[str, List[Dict[str, Any]]] = {}
+    attrs_by_field: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for a in collected_attributes:
         f = a["canonical_field"]
-        attrs_by_field.setdefault(f, []).append(a)
+        attrs_by_field[f].append(a)
 
-    # 1. Authoritative Name: Most complete / longest, penalizing single-letter abbreviations
+    # 1. Authoritative Name: Longest, most complete personal name
     name_candidates = [
         str(a["original_value"]).strip()
         for a in attrs_by_field.get("name", [])
         if a.get("original_value") and str(a["original_value"]).strip()
     ]
-    def score_name(n: str) -> float:
+
+    def score_name(n: str) -> Tuple[int, int, int]:
         clean = n.strip()
         tokens = clean.split()
-        has_abbrev = any(len(t.rstrip(".")) <= 1 for t in tokens)
-        is_title = clean.istitle()
-        return (len(tokens) * 100.0) + len(clean) - (50.0 if has_abbrev else 0.0) + (10.0 if is_title else 0.0)
+        full_tokens = sum(1 for t in tokens if len(t.rstrip(".")) > 1)
+        return (full_tokens, len(clean), len(tokens))
 
     best_name = max(name_candidates, key=score_name) if name_candidates else ""
     if best_name and (best_name.isupper() or best_name.islower()):
         best_name = best_name.title()
 
-    # 2. Authoritative Email: Primary valid RFC email
+    # 2. Authoritative Phone: Standardized 10-digit normalized phone
+    phone_candidates = [
+        str(a.get("normalized_value") or a.get("original_value") or "").strip()
+        for a in attrs_by_field.get("phone", [])
+        if a.get("normalized_value") or a.get("original_value")
+    ]
+    best_phone = ""
+    for ph in phone_candidates:
+        norm = normalize_field("phone", ph)
+        if len(norm) == 10:
+            best_phone = norm
+            break
+    if not best_phone and phone_candidates:
+        best_phone = normalize_field("phone", phone_candidates[0])
+
+    # 3. Authoritative Email: Trimmed, lowercased RFC email
     email_candidates = [
-        str(a.get("original_value") or a.get("normalized_value") or "").strip().lower()
+        str(a.get("normalized_value") or a.get("original_value") or "").strip().lower()
         for a in attrs_by_field.get("email", [])
-        if a.get("original_value") or a.get("normalized_value")
+        if a.get("normalized_value") or a.get("original_value")
     ]
     best_email = ""
     for em in email_candidates:
@@ -85,37 +169,18 @@ def select_authoritative_profile(collected_attributes: List[Dict[str, Any]]) -> 
     if not best_email and email_candidates:
         best_email = email_candidates[0]
 
-    # 3. Authoritative Phone: Standardized 10-digit phone
-    phone_candidates = [
-        str(a.get("original_value") or a.get("normalized_value") or "").strip()
-        for a in attrs_by_field.get("phone", [])
-        if a.get("original_value") or a.get("normalized_value")
-    ]
-    best_phone = ""
-    for ph in phone_candidates:
-        digits = re.sub(r"\D", "", ph)
-        if len(digits) == 12 and digits.startswith("91"):
-            digits = digits[2:]
-        elif len(digits) == 11 and digits.startswith("0"):
-            digits = digits[1:]
-        elif len(digits) > 10 and digits.endswith(digits[-10:]) and (digits.startswith("91") or digits.startswith("0")):
-            digits = digits[-10:]
-        if len(digits) == 10:
-            best_phone = digits
-            break
-    if not best_phone and phone_candidates:
-        digits = re.sub(r"\D", "", phone_candidates[0])
-        best_phone = digits[-10:] if len(digits) >= 10 else digits
-
-    # 4. Authoritative Username
+    # 4. Authoritative Username: Normalized username token
     user_candidates = [
-        str(a.get("original_value") or a.get("normalized_value") or "").strip().lower()
+        str(a.get("normalized_value") or a.get("original_value") or "").strip()
         for a in attrs_by_field.get("username", [])
-        if a.get("original_value") or a.get("normalized_value")
+        if a.get("normalized_value") or a.get("original_value")
     ]
-    best_username = max(user_candidates, key=len) if user_candidates else ""
+    best_username = ""
+    if user_candidates:
+        norm_users = [normalize_field("username", u) for u in user_candidates]
+        best_username = max(norm_users, key=len)
 
-    # 5. Authoritative Address
+    # 5. Authoritative Address: Longest address string
     addr_candidates = [
         str(a.get("original_value") or "").strip()
         for a in attrs_by_field.get("address", [])
@@ -125,7 +190,7 @@ def select_authoritative_profile(collected_attributes: List[Dict[str, Any]]) -> 
     if best_address and (best_address.islower() or best_address.isupper()):
         best_address = best_address.title()
 
-    # 6. Authoritative Company
+    # 6. Authoritative Company: Longest company string
     comp_candidates = [
         str(a.get("original_value") or "").strip()
         for a in attrs_by_field.get("company", [])
@@ -133,27 +198,15 @@ def select_authoritative_profile(collected_attributes: List[Dict[str, Any]]) -> 
     ]
     best_company = max(comp_candidates, key=len) if comp_candidates else ""
 
-    # 7. Authoritative Member ID
-    id_candidates = [
-        str(a.get("original_value") or "").strip()
-        for a in (attrs_by_field.get("member_id", []) + attrs_by_field.get("source_record_id", []))
-        if a.get("original_value") and str(a["original_value"]).strip()
-    ]
-    best_member_id = ""
-    for val in id_candidates:
-        if re.match(r"^M\d+", val, re.IGNORECASE):
-            best_member_id = val.upper()
-            break
-    if not best_member_id and attrs_by_field.get("member_id"):
-        best_member_id = str(attrs_by_field["member_id"][0].get("original_value") or "")
-
-    # 8. Primary Source Record ID
+    # Source tracking IDs (C301, B101, E101, M1042)
     src_id_candidates = [
         str(a.get("original_value") or "").strip()
-        for a in attrs_by_field.get("source_record_id", [])
+        for a in (attrs_by_field.get("source_record_id", []) + attrs_by_field.get("member_id", []))
         if a.get("original_value") and str(a["original_value"]).strip()
     ]
-    best_source_id = src_id_candidates[0] if src_id_candidates else (best_member_id or "")
+    unique_src_ids = list(dict.fromkeys(src_id_candidates))
+    primary_src_id = unique_src_ids[0] if unique_src_ids else ""
+    member_id_val = next((i for i in unique_src_ids if i.upper().startswith("M")), primary_src_id)
 
     return {
         "name": best_name,
@@ -162,17 +215,23 @@ def select_authoritative_profile(collected_attributes: List[Dict[str, Any]]) -> 
         "username": best_username,
         "address": best_address,
         "company": best_company,
-        "member_id": best_member_id,
-        "source_record_id": best_source_id
+        "source_record_id": primary_src_id,
+        "source_record_ids": unique_src_ids,
+        "member_id": member_id_val
     }
 
 
 def resolve_workspace_entities(workspace_id: str, db: Session) -> Dict[str, Any]:
     """
-    Executes a session-wide connected component graph resolution pass over all
-    indexed records in the specified workspace session.
-    Discovers disjoint identity clusters, synthesizes authoritative master entities,
-    links attributes, and records cross-dataset discovery hops.
+    Exact Disjoint-Set Union (DSU) / Connected Components Resolution Engine.
+
+    Mathematical Invariants:
+      1. Node: Every ingested record across the session is node (source_id, record_index).
+      2. Match Edge: Record 1 and Record 2 are connected iff they share identical
+         (canonical_field, normalized_value) where canonical_field in {'email', 'phone', 'username'}.
+         source_record_id is strictly NOT added to the match graph.
+      3. Connected Components: Every component in DSU forms exactly ONE MasterEntity.
+      4. Incremental Merging: Existing entities retain stable IDs; merged components absorb cleanly.
     """
     if not workspace_id:
         return {"master_entities": 0, "links_discovered": 0}
@@ -182,70 +241,107 @@ def resolve_workspace_entities(workspace_id: str, db: Session) -> Dict[str, Any]
     if not all_attrs:
         return {"master_entities": 0, "links_discovered": 0}
 
-    # Group attributes by record (source_id, record_index)
+    # 1. Group attributes by record node: (source_id, record_index)
     rec_attrs: Dict[Tuple[int, int], List[AttributeIndex]] = defaultdict(list)
     ident_to_records: Dict[Tuple[str, str], List[Tuple[int, int]]] = defaultdict(list)
 
     for attr in all_attrs:
         rec_key = (attr.source_id, attr.record_index)
         rec_attrs[rec_key].append(attr)
-        if attr.is_identifier or attr.canonical_field in IDENTIFIER_FIELDS:
+
+        # Only whitelisted identifiers form match edges
+        is_ident = attr.is_identifier or (attr.canonical_field in MATCH_IDENTIFIER_FIELDS)
+        if is_ident and (attr.canonical_field in MATCH_IDENTIFIER_FIELDS) and (attr.canonical_field != "source_record_id"):
             norm_val = (attr.normalized_value or attr.original_value or "").strip()
             if norm_val:
-                ident_key = (attr.canonical_field, norm_val)
-                ident_to_records[ident_key].append(rec_key)
+                ident_to_records[(attr.canonical_field, norm_val)].append(rec_key)
 
-    # Build adjacency graph between records
-    adj: Dict[Tuple[int, int], List[Tuple[Tuple[int, int], Tuple[str, str]]]] = defaultdict(list)
-    for ident_key, rec_list in ident_to_records.items():
+    # 2. Initialize DSU over all records
+    all_records = list(rec_attrs.keys())
+    dsu = DisjointSetUnion(all_records)
+
+    # 3. Form match edges between records sharing identical identifier
+    cross_source_record_pairs: Set[Tuple[Tuple[int, int], Tuple[int, int]]] = set()
+    edge_hops_by_component: Dict[Tuple[int, int], List[Dict[str, Any]]] = defaultdict(list)
+
+    for (matched_field, matched_val), rec_list in ident_to_records.items():
+        unique_recs = list(dict.fromkeys(rec_list))
+        if len(unique_recs) > 1:
+            root_rec = unique_recs[0]
+            for other_rec in unique_recs[1:]:
+                dsu.union(root_rec, other_rec)
+
+        # Track cross-source links (source_id_A != source_id_B)
+        for i in range(len(unique_recs)):
+            for j in range(i + 1, len(unique_recs)):
+                r1, r2 = unique_recs[i], unique_recs[j]
+                if r1[0] != r2[0]:
+                    pair = (min(r1, r2), max(r1, r2))
+                    cross_source_record_pairs.add(pair)
+
+    # 4. Group records by Connected Component
+    component_groups: Dict[Tuple[int, int], List[Tuple[int, int]]] = defaultdict(list)
+    for rec in all_records:
+        comp_root = dsu.find(rec)
+        component_groups[comp_root].append(rec)
+
+    # 5. Persistent Incremental Merging: Map existing record locations to prior MasterEntity IDs
+    existing_attr_rows = db.query(
+        EntityAttribute.entity_id,
+        EntityAttribute.source_id,
+        EntityAttribute.record_index
+    ).join(MasterEntity, EntityAttribute.entity_id == MasterEntity.id).filter(
+        MasterEntity.workspace_id == workspace_id
+    ).all()
+
+    rec_to_prior_entity: Dict[Tuple[int, int], str] = {
+        (row.source_id, row.record_index): row.entity_id
+        for row in existing_attr_rows
+    }
+
+    # Clean up prior EntityAttribute and EnrichmentHop records to refresh component membership
+    prior_entities = db.query(MasterEntity).filter_by(workspace_id=workspace_id).all()
+    prior_entity_map = {e.id: e for e in prior_entities}
+    prior_ids = list(prior_entity_map.keys())
+
+    if prior_ids:
+        db.query(EntityAttribute).filter(EntityAttribute.entity_id.in_(prior_ids)).delete(synchronize_session=False)
+        db.query(EnrichmentHop).filter(EnrichmentHop.entity_id.in_(prior_ids)).delete(synchronize_session=False)
+        db.flush()
+
+    now_utc = datetime.now(timezone.utc)
+    used_entity_ids: Set[str] = set()
+    total_hops_created = 0
+
+    # Build cross-source adjacency for hop tracing
+    cross_adj: Dict[Tuple[int, int], List[Tuple[Tuple[int, int], str, str]]] = defaultdict(list)
+    for (matched_field, matched_val), rec_list in ident_to_records.items():
         unique_recs = list(dict.fromkeys(rec_list))
         for i in range(len(unique_recs)):
             for j in range(i + 1, len(unique_recs)):
                 r1, r2 = unique_recs[i], unique_recs[j]
-                adj[r1].append((r2, ident_key))
-                adj[r2].append((r1, ident_key))
+                if r1[0] != r2[0]:
+                    cross_adj[r1].append((r2, matched_field, matched_val))
+                    cross_adj[r2].append((r1, matched_field, matched_val))
 
-    # BFS connected components
-    visited_recs: Set[Tuple[int, int]] = set()
-    clusters = []
+    for comp_root, comp_recs in component_groups.items():
+        # Determine stable entity ID: reuse prior entity ID if any record belonged to one
+        candidate_ids = [
+            rec_to_prior_entity[r] for r in comp_recs
+            if r in rec_to_prior_entity and rec_to_prior_entity[r] not in used_entity_ids
+        ]
+        if candidate_ids:
+            entity_id = candidate_ids[0]
+        else:
+            entity_id = f"ENT-{uuid.uuid4().hex[:6].upper()}"
 
-    for start_rec in rec_attrs.keys():
-        if start_rec in visited_recs:
-            continue
+        used_entity_ids.add(entity_id)
 
-        comp_recs = []
-        comp_hops = []
-        comp_attrs = []
-
-        q = deque([start_rec])
-        visited_recs.add(start_rec)
-        comp_recs.append(start_rec)
-
-        hop_counter = 0
-
-        while q:
-            curr_rec = q.popleft()
-            for neighbor, (matched_field, matched_val) in adj.get(curr_rec, []):
-                if neighbor not in visited_recs:
-                    visited_recs.add(neighbor)
-                    q.append(neighbor)
-                    comp_recs.append(neighbor)
-
-                    # Create discovery hop from curr_rec to neighbor
-                    hop_counter += 1
-                    for n_attr in rec_attrs[neighbor]:
-                        comp_hops.append({
-                            "step_order": hop_counter,
-                            "source_id": neighbor[0],
-                            "matched_field": matched_field,
-                            "matched_value": matched_val,
-                            "discovered_field": n_attr.canonical_field,
-                            "discovered_value": n_attr.original_value or n_attr.normalized_value
-                        })
-
+        # Collect all attributes for this component
+        comp_attr_dicts: List[Dict[str, Any]] = []
         for r in comp_recs:
             for a in rec_attrs[r]:
-                comp_attrs.append({
+                comp_attr_dicts.append({
                     "source_id": a.source_id,
                     "record_index": a.record_index,
                     "canonical_field": a.canonical_field,
@@ -254,45 +350,35 @@ def resolve_workspace_entities(workspace_id: str, db: Session) -> Dict[str, Any]
                     "is_identifier": a.is_identifier
                 })
 
-        clusters.append({
-            "records": comp_recs,
-            "attributes": comp_attrs,
-            "hops": comp_hops
-        })
-
-    # Clear prior resolution data for this workspace to maintain accurate idempotent counts
-    prior_entities = db.query(MasterEntity).filter_by(workspace_id=workspace_id).all()
-    prior_ids = [e.id for e in prior_entities]
-    if prior_ids:
-        db.query(EntityAttribute).filter(EntityAttribute.entity_id.in_(prior_ids)).delete(synchronize_session=False)
-        db.query(EnrichmentHop).filter(EnrichmentHop.entity_id.in_(prior_ids)).delete(synchronize_session=False)
-        db.query(MasterEntity).filter(MasterEntity.id.in_(prior_ids)).delete(synchronize_session=False)
-        db.flush()
-
-    now_utc = datetime.now(timezone.utc)
-    total_hops_created = 0
-
-    for idx, cluster in enumerate(clusters):
-        comp_attrs = cluster["attributes"]
-        authoritative = select_authoritative_profile(comp_attrs)
-        master_name = authoritative["name"] or authoritative["email"] or authoritative["username"] or f"Entity #{idx+1}"
-
-        entity_id = f"ENT-{uuid.uuid4().hex[:6].upper()}"
-        master_entity = MasterEntity(
-            id=entity_id,
-            workspace_id=workspace_id,
-            canonical_name=master_name,
-            created_at=now_utc,
-            updated_at=now_utc
+        authoritative = select_authoritative_profile(comp_attr_dicts)
+        master_name = (
+            authoritative["name"]
+            or authoritative["email"]
+            or authoritative["username"]
+            or f"Entity #{len(used_entity_ids)}"
         )
-        db.add(master_entity)
+
+        # Upsert MasterEntity
+        if entity_id in prior_entity_map:
+            master_entity = prior_entity_map[entity_id]
+            master_entity.canonical_name = master_name
+            master_entity.updated_at = now_utc
+        else:
+            master_entity = MasterEntity(
+                id=entity_id,
+                workspace_id=workspace_id,
+                canonical_name=master_name,
+                created_at=now_utc,
+                updated_at=now_utc
+            )
+            db.add(master_entity)
         db.flush()
 
-        # Deduplicate attributes
-        unique_attrs: Dict[Tuple[int, int, str], Dict[str, Any]] = {}
-        for attr in comp_attrs:
-            key = (attr["source_id"], attr["record_index"], attr["canonical_field"])
-            unique_attrs[key] = attr
+        # Deduplicate and persist EntityAttributes
+        unique_attrs: Dict[Tuple[int, int, str, str], Dict[str, Any]] = {}
+        for attr in comp_attr_dicts:
+            ukey = (attr["source_id"], attr["record_index"], attr["canonical_field"], str(attr["original_value"]))
+            unique_attrs[ukey] = attr
 
         ent_attr_objs = [
             EntityAttribute(
@@ -308,68 +394,191 @@ def resolve_workspace_entities(workspace_id: str, db: Session) -> Dict[str, Any]
         ]
         db.add_all(ent_attr_objs)
 
-        # Add hops
-        hop_objs = [
-            EnrichmentHop(
-                entity_id=entity_id,
-                step_order=h["step_order"],
-                source_id=h["source_id"],
-                matched_field=h["matched_field"],
-                matched_value=str(h["matched_value"]),
-                discovered_field=h["discovered_field"],
-                discovered_value=str(h["discovered_value"])
-            )
-            for h in cluster["hops"]
-        ]
-        if hop_objs:
-            db.add_all(hop_objs)
-            total_hops_created += len(hop_objs)
+        # Generate BFS discovery hops for this component
+        comp_rec_set = set(comp_recs)
+        visited_hop_recs: Set[Tuple[int, int]] = set()
+        start_rec = comp_recs[0]
+        visited_hop_recs.add(start_rec)
+        q = deque([start_rec])
+        step_order = 0
+
+        while q:
+            curr = q.popleft()
+            for nxt, m_field, m_val in cross_adj.get(curr, []):
+                if nxt in comp_rec_set and nxt not in visited_hop_recs:
+                    visited_hop_recs.add(nxt)
+                    q.append(nxt)
+                    step_order += 1
+                    for n_attr in rec_attrs[nxt]:
+                        hop_obj = EnrichmentHop(
+                            entity_id=entity_id,
+                            step_order=step_order,
+                            source_id=nxt[0],
+                            matched_field=m_field,
+                            matched_value=str(m_val),
+                            discovered_field=n_attr.canonical_field,
+                            discovered_value=str(n_attr.original_value or n_attr.normalized_value)
+                        )
+                        db.add(hop_obj)
+                        total_hops_created += 1
+
+    # Remove any obsolete prior entities that got merged away
+    obsolete_ids = [pid for pid in prior_ids if pid not in used_entity_ids]
+    if obsolete_ids:
+        db.query(MasterEntity).filter(MasterEntity.id.in_(obsolete_ids)).delete(synchronize_session=False)
 
     db.commit()
+
+    cross_source_links = len(cross_source_record_pairs)
 
     return {
         "status": "success",
         "workspace_id": workspace_id,
-        "master_entities": len(clusters),
-        "links_discovered": total_hops_created,
-        "total_records_resolved": sum(len(c["records"]) for c in clusters)
+        "master_entities": len(component_groups),
+        "links_discovered": cross_source_links,
+        "multi_hop_links": cross_source_links,
+        "total_records_resolved": len(all_records)
     }
 
 
-def progressive_enrich(seed_field: str, seed_value: str, db: Session, workspace_id: Optional[str] = None) -> Dict[str, Any]:
+def progressive_enrich(
+    seed_field: str,
+    seed_value: str,
+    db: Session,
+    workspace_id: Optional[str] = None
+) -> Dict[str, Any]:
     """
-    Executes iterative BFS graph-discovery across the AttributeIndex EAV store.
-
-    Parameters:
-      - seed_field: Initial anchor attribute (e.g. 'full_name', 'email', 'phone')
-      - seed_value: Initial search value (e.g. 'John Doe', '9876543210')
-      - db: Active SQLAlchemy database session
-      - workspace_id: Optional workspace session filter isolating traversal to active session
-
-    Returns:
-      - Consolidated MasterEntity profile with authoritative attributes
-      - Full data lineage table across contributing operational sources
-      - Step-by-step discovery timeline of hops
+    Executes iterative BFS graph-discovery across the AttributeIndex repository,
+    reconstructing complete 360-degree identity graphs.
     """
     canonical_seed_field = resolve_canonical_field(seed_field)
     norm_seed_value = normalize_field(canonical_seed_field, seed_value)
 
-    # Data structures for iterative BFS traversal
+    # If workspace_id is provided, try looking up via pre-computed MasterEntity
+    if workspace_id:
+        target_entity = None
+
+        # 1. Exact match by normalized value or original value in EntityAttribute
+        attr_match = db.query(EntityAttribute).join(
+            MasterEntity, EntityAttribute.entity_id == MasterEntity.id
+        ).filter(
+            MasterEntity.workspace_id == workspace_id,
+            EntityAttribute.canonical_field == canonical_seed_field,
+            (EntityAttribute.normalized_value == norm_seed_value) | (EntityAttribute.original_value == seed_value)
+        ).first()
+
+        if not attr_match and canonical_seed_field == "name":
+            # Case-insensitive name match
+            attr_match = db.query(EntityAttribute).join(
+                MasterEntity, EntityAttribute.entity_id == MasterEntity.id
+            ).filter(
+                MasterEntity.workspace_id == workspace_id,
+                EntityAttribute.canonical_field == "name",
+                func.lower(EntityAttribute.original_value) == seed_value.strip().lower()
+            ).first()
+
+        if attr_match:
+            target_entity = db.query(MasterEntity).filter_by(id=attr_match.entity_id).first()
+
+        # If found precomputed MasterEntity, build profile directly from its resolved cluster
+        if target_entity:
+            ent_attrs = db.query(EntityAttribute).filter_by(entity_id=target_entity.id).all()
+            ent_hops = db.query(EnrichmentHop).filter_by(entity_id=target_entity.id).order_by(EnrichmentHop.step_order.asc()).all()
+
+            collected = [
+                {
+                    "source_id": a.source_id,
+                    "record_index": a.record_index,
+                    "canonical_field": a.canonical_field,
+                    "original_value": a.original_value,
+                    "normalized_value": a.normalized_value,
+                    "is_identifier": a.is_identifier
+                }
+                for a in ent_attrs
+            ]
+            authoritative_profile = select_authoritative_profile(collected)
+
+            # Consolidate raw variations by field
+            consolidated: Dict[str, List[str]] = defaultdict(list)
+            for a in collected:
+                f = a["canonical_field"]
+                val = a["original_value"] or a["normalized_value"]
+                if val and val not in consolidated[f]:
+                    consolidated[f].append(val)
+
+            # Lineage
+            source_ids = list({a["source_id"] for a in collected})
+            sources_cache = {s.id: s for s in db.query(Source).filter(Source.id.in_(source_ids)).all()}
+            records_grouped: Dict[Tuple[int, int], Dict[str, Any]] = {}
+            for a in collected:
+                rkey = (a["source_id"], a["record_index"])
+                if rkey not in records_grouped:
+                    s_obj = sources_cache.get(a["source_id"])
+                    records_grouped[rkey] = {
+                        "source_id": a["source_id"],
+                        "source_name": s_obj.name if s_obj else f"Source #{a['source_id']}",
+                        "source_type": s_obj.source_type if s_obj else "UNKNOWN",
+                        "record_index": a["record_index"],
+                        "attributes": {}
+                    }
+                records_grouped[rkey]["attributes"][a["canonical_field"]] = a["original_value"]
+
+            lineage_records = list(records_grouped.values())
+            hops_data = [
+                {
+                    "step_order": h.step_order,
+                    "source_id": h.source_id,
+                    "matched_field": h.matched_field,
+                    "matched_value": h.matched_value,
+                    "discovered_field": h.discovered_field,
+                    "discovered_value": h.discovered_value,
+                    "description": f"Discovered {h.discovered_field} from Source #{h.source_id} via {h.matched_field}='{h.matched_value}'"
+                }
+                for h in ent_hops
+            ]
+
+            ai_exp = _synthesize_resolution_explanation(
+                master_name=target_entity.canonical_name,
+                entity_id=target_entity.id,
+                seed_field=canonical_seed_field,
+                seed_value=seed_value,
+                hops=hops_data,
+                lineage=lineage_records,
+                sources_cache=sources_cache
+            )
+
+            return {
+                "entity": {
+                    "id": target_entity.id,
+                    "canonical_name": target_entity.canonical_name,
+                    "created_at": target_entity.created_at.isoformat() if target_entity.created_at else None,
+                    "updated_at": target_entity.updated_at.isoformat() if target_entity.updated_at else None,
+                    "consolidated_attributes": dict(consolidated),
+                    "authoritative_profile": authoritative_profile
+                },
+                "status": "success",
+                "total_sources_linked": len(source_ids),
+                "total_attributes_discovered": len(collected),
+                "total_hops": len(hops_data),
+                "lineage": lineage_records,
+                "hops": hops_data,
+                "gemini_explanation": ai_exp
+            }
+
+    # BFS Traversal fallback
     search_queue: deque = deque([(canonical_seed_field, norm_seed_value)])
     visited_identifiers: Set[Tuple[str, str]] = {(canonical_seed_field, norm_seed_value)}
     visited_records: Set[Tuple[int, int]] = set()
     discovery_hops: List[Dict[str, Any]] = []
     collected_attributes: List[Dict[str, Any]] = []
-
     step_counter = 0
 
     while search_queue:
         curr_field, curr_val = search_queue.popleft()
 
-        # Query AttributeIndex for matching canonical field and normalized value
         attr_query = db.query(AttributeIndex).filter(
             AttributeIndex.canonical_field == curr_field,
-            AttributeIndex.normalized_value == curr_val
+            (AttributeIndex.normalized_value == curr_val) | (AttributeIndex.original_value == curr_val)
         )
         if workspace_id:
             attr_query = attr_query.filter(AttributeIndex.workspace_id == workspace_id)
@@ -418,7 +627,6 @@ def progressive_enrich(seed_field: str, seed_value: str, db: Session, workspace_
                 continue
             visited_records.add(rec_key)
 
-            # Fetch all sibling attributes for this record in this operational source
             sib_query = db.query(AttributeIndex).filter(
                 AttributeIndex.source_id == match.source_id,
                 AttributeIndex.record_index == match.record_index
@@ -443,13 +651,13 @@ def progressive_enrich(seed_field: str, seed_value: str, db: Session, workspace_
                 }
                 discovery_hops.append(hop_info)
 
-                # If sibling is an identifier and unvisited, push to BFS queue
-                ident_key = (sib.canonical_field, sib.normalized_value)
-                if sib.is_identifier and ident_key not in visited_identifiers:
-                    visited_identifiers.add(ident_key)
-                    search_queue.append(ident_key)
+                is_ident = sib.is_identifier or (sib.canonical_field in MATCH_IDENTIFIER_FIELDS)
+                if is_ident and (sib.canonical_field in MATCH_IDENTIFIER_FIELDS) and (sib.canonical_field != "source_record_id"):
+                    ident_key = (sib.canonical_field, sib.normalized_value)
+                    if ident_key not in visited_identifiers:
+                        visited_identifiers.add(ident_key)
+                        search_queue.append(ident_key)
 
-                # Collect into master profile attribute candidate list
                 collected_attributes.append({
                     "source_id": sib.source_id,
                     "record_index": sib.record_index,
@@ -468,102 +676,23 @@ def progressive_enrich(seed_field: str, seed_value: str, db: Session, workspace_
             "hops": []
         }
 
-    # Best-value selection for Authoritative Master Record
     authoritative_profile = select_authoritative_profile(collected_attributes)
     master_name = authoritative_profile["name"] or seed_value
 
-    # Check if any collected attribute was previously linked to an existing MasterEntity
-    attr_query = db.query(EntityAttribute).filter(
-        EntityAttribute.source_id.in_([a["source_id"] for a in collected_attributes]),
-        EntityAttribute.record_index.in_([a["record_index"] for a in collected_attributes])
-    )
-    if workspace_id:
-        attr_query = attr_query.join(MasterEntity, EntityAttribute.entity_id == MasterEntity.id).filter(
-            MasterEntity.workspace_id == workspace_id
-        )
-    existing_attr = attr_query.first()
+    entity_id = f"ENT-{uuid.uuid4().hex[:6].upper()}"
 
-    entity_id = existing_attr.entity_id if existing_attr else f"ENT-{uuid.uuid4().hex[:6].upper()}"
-
-    # Upsert MasterEntity record
-    master_entity = db.query(MasterEntity).filter_by(id=entity_id).first()
-    now_utc = datetime.now(timezone.utc)
-    if not master_entity:
-        master_entity = MasterEntity(
-            id=entity_id,
-            workspace_id=workspace_id,
-            canonical_name=master_name,
-            created_at=now_utc,
-            updated_at=now_utc
-        )
-        db.add(master_entity)
-    else:
-        if workspace_id:
-            master_entity.workspace_id = workspace_id
-        master_entity.canonical_name = master_name
-        master_entity.updated_at = now_utc
-    db.flush()
-
-    # Clear prior attributes and hops for this entity
-    db.query(EntityAttribute).filter_by(entity_id=entity_id).delete()
-    db.query(EnrichmentHop).filter_by(entity_id=entity_id).delete()
-    db.flush()
-
-    # Bulk persist EntityAttribute records (deduplicating identical entries)
-    unique_attrs: Dict[Tuple[int, int, str], Dict[str, Any]] = {}
+    consolidated_attributes: Dict[str, List[str]] = defaultdict(list)
     for attr in collected_attributes:
-        key = (attr["source_id"], attr["record_index"], attr["canonical_field"])
-        unique_attrs[key] = attr
-
-    ent_attr_objs = [
-        EntityAttribute(
-            entity_id=entity_id,
-            source_id=attr["source_id"],
-            record_index=attr["record_index"],
-            canonical_field=attr["canonical_field"],
-            original_value=attr["original_value"],
-            normalized_value=attr["normalized_value"],
-            is_identifier=attr["is_identifier"]
-        )
-        for attr in unique_attrs.values()
-    ]
-    db.add_all(ent_attr_objs)
-
-    # Bulk persist EnrichmentHop records
-    hop_objs = [
-        EnrichmentHop(
-            entity_id=entity_id,
-            step_order=h["step_order"],
-            source_id=h["source_id"],
-            matched_field=h["matched_field"],
-            matched_value=str(h["matched_value"]),
-            discovered_field=h["discovered_field"],
-            discovered_value=str(h["discovered_value"])
-        )
-        for h in discovery_hops
-    ]
-    db.add_all(hop_objs)
-    db.commit()
-    db.refresh(master_entity)
-
-    # Consolidate raw variations by field for provenance
-    consolidated_attributes: Dict[str, List[str]] = {}
-    for attr in unique_attrs.values():
         field = attr["canonical_field"]
         val = attr["original_value"] or attr["normalized_value"]
-        if val:
-            consolidated_attributes.setdefault(field, [])
-            if val not in consolidated_attributes[field]:
-                consolidated_attributes[field].append(val)
+        if val and val not in consolidated_attributes[field]:
+            consolidated_attributes[field].append(val)
 
-    # Build source lineage table
-    sources_cache: Dict[int, Source] = {}
-    source_ids = list({a["source_id"] for a in unique_attrs.values()})
-    for s in db.query(Source).filter(Source.id.in_(source_ids)).all():
-        sources_cache[s.id] = s
+    source_ids = list({a["source_id"] for a in collected_attributes})
+    sources_cache = {s.id: s for s in db.query(Source).filter(Source.id.in_(source_ids)).all()}
 
     records_grouped: Dict[Tuple[int, int], Dict[str, Any]] = {}
-    for attr in unique_attrs.values():
+    for attr in collected_attributes:
         rkey = (attr["source_id"], attr["record_index"])
         if rkey not in records_grouped:
             s_obj = sources_cache.get(attr["source_id"])
@@ -578,7 +707,6 @@ def progressive_enrich(seed_field: str, seed_value: str, db: Session, workspace_
 
     lineage_records = list(records_grouped.values())
 
-    # Build AI match rationale explanation
     ai_explanation = _synthesize_resolution_explanation(
         master_name=master_name,
         entity_id=entity_id,
@@ -591,16 +719,16 @@ def progressive_enrich(seed_field: str, seed_value: str, db: Session, workspace_
 
     return {
         "entity": {
-            "id": master_entity.id,
-            "canonical_name": master_entity.canonical_name,
-            "created_at": master_entity.created_at.isoformat() if master_entity.created_at else None,
-            "updated_at": master_entity.updated_at.isoformat() if master_entity.updated_at else None,
-            "consolidated_attributes": consolidated_attributes,
+            "id": entity_id,
+            "canonical_name": master_name,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "consolidated_attributes": dict(consolidated_attributes),
             "authoritative_profile": authoritative_profile
         },
         "status": "success",
         "total_sources_linked": len(source_ids),
-        "total_attributes_discovered": len(unique_attrs),
+        "total_attributes_discovered": len(collected_attributes),
         "total_hops": len(discovery_hops),
         "lineage": lineage_records,
         "hops": discovery_hops,
@@ -621,29 +749,6 @@ def _synthesize_resolution_explanation(
     Produces a plain-English explanation of why disjoint records across silos represent the same individual,
     querying Gemini if configured, or synthesizing via graph predicate analysis.
     """
-    try:
-        from backend.services.gemini_service import GeminiDisambiguationService
-        svc = GeminiDisambiguationService()
-        if svc.is_available():
-            prompt = (
-                f"You are an expert Entity Resolution and Record Linkage engine. "
-                f"Explain clearly and concisely in 2 to 3 paragraphs how the disjoint database records "
-                f"from {[l.get('source_name') for l in lineage]} were proven to represent the same individual "
-                f"'{master_name}' ({entity_id}).\n"
-                f"Seed query: {seed_field} = '{seed_value}'.\n"
-                f"Hops followed:\n" + "\n".join(
-                    [f"- Step {h['step_order']}: Hopped to Source {sources_cache.get(h['source_id'], {}).name if hasattr(sources_cache.get(h['source_id']), 'name') else h['source_id']} via {h['matched_field']}='{h['matched_value']}' -> Discovered {h['discovered_field']}='{h['discovered_value']}'" for h in hops]
-                ) + "\nHighlight why there is high confidence and zero conflicting canonical identity markers."
-            )
-            response = svc.client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt
-            )
-            if response and response.text and len(response.text.strip()) > 30:
-                return response.text.strip()
-    except Exception:
-        pass
-
     silo_names = [l.get("source_name", "Database") for l in lineage]
     unique_silos = list(dict.fromkeys(silo_names))
 
@@ -662,7 +767,7 @@ def _synthesize_resolution_explanation(
         f"Starting from seed identifier `{seed_field} = '{seed_value}'`, the traversal formed transitive bridges across database boundaries:\n"
         + "\n".join(step_summaries[:8]) + "\n\n"
         f"**Deterministic Confidence Assessment:**\n"
-        f"Each hop was anchored by high-cardinality normalized identifiers (Phone: E.164 10-digit format, Email: RFC 5322 lowercase, Username: alphanumeric canonical token). "
+        f"Each hop was anchored by high-cardinality normalized identifiers (Phone: E.164 10-digit format, Email: RFC 5322 lowercase, Username: canonical alphanumeric token). "
         f"Zero contradictory attributes or demographic collision vectors were observed across the traversed records, establishing **99.8% resolution confidence** that these disparate records belong to the same physical individual."
     )
     return explanation

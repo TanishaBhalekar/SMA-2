@@ -33,16 +33,22 @@ def test_create_workspace():
 
 
 def test_list_and_get_workspaces():
-    """Verify GET /api/workspaces and GET /api/workspaces/{id}."""
+    """Verify GET /api/workspaces with include_empty filter and GET /api/workspaces/{id}."""
     # Create workspace
     create_res = client.post("/api/workspaces", json={"name": "Beta Workspace"})
     ws_id = create_res.json()["id"]
 
-    # List
-    list_res = client.get("/api/workspaces")
-    assert list_res.status_code == 200
-    workspaces = list_res.json()
-    assert any(w["id"] == ws_id for w in workspaces)
+    # List with include_empty=True -> should include Beta Workspace
+    list_res_all = client.get("/api/workspaces?include_empty=true")
+    assert list_res_all.status_code == 200
+    workspaces_all = list_res_all.json()
+    assert any(w["id"] == ws_id for w in workspaces_all)
+
+    # Default list (include_empty=False) -> should filter out empty Beta Workspace
+    list_res_filtered = client.get("/api/workspaces")
+    assert list_res_filtered.status_code == 200
+    workspaces_filtered = list_res_filtered.json()
+    assert not any(w["id"] == ws_id for w in workspaces_filtered)
 
     # Get details
     detail_res = client.get(f"/api/workspaces/{ws_id}")
@@ -52,6 +58,35 @@ def test_list_and_get_workspaces():
     assert detail["name"] == "Beta Workspace"
     assert "sources" in detail
     assert "stats" in detail
+
+
+def test_purge_empty_workspaces():
+    """Verify POST /api/workspaces/purge-empty and GET /api/workspaces?cleanup=true remove workspaces with 0 sources."""
+    # Create an empty workspace
+    create_res = client.post("/api/workspaces", json={"name": "Temporary Empty Session"})
+    empty_id = create_res.json()["id"]
+
+    # Purge empty workspaces via POST /api/workspaces/purge-empty
+    purge_res = client.post("/api/workspaces/purge-empty")
+    assert purge_res.status_code == 200
+    data = purge_res.json()
+    assert data["status"] == "success"
+    assert data["purged_count"] >= 1
+
+    # Check detail -> 404
+    detail_res = client.get(f"/api/workspaces/{empty_id}")
+    assert detail_res.status_code == 404
+
+    # Create another empty workspace to test GET /api/workspaces?cleanup=true
+    create_res2 = client.post("/api/workspaces", json={"name": "Another Empty Session"})
+    empty_id2 = create_res2.json()["id"]
+
+    cleanup_list = client.get("/api/workspaces?cleanup=true")
+    assert cleanup_list.status_code == 200
+    assert not any(w["id"] == empty_id2 for w in cleanup_list.json())
+    # Verify it was physically purged
+    detail_res2 = client.get(f"/api/workspaces/{empty_id2}")
+    assert detail_res2.status_code == 404
 
 
 def test_update_and_rename_workspace():

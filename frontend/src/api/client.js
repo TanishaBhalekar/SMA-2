@@ -67,6 +67,7 @@ export const api = {
   createWorkspace: (data = {}) => apiClient.post('/api/workspaces', data),
   updateWorkspace: (id, data) => apiClient.patch(`/api/workspaces/${id}`, data),
   deleteWorkspace: (id) => apiClient.delete(`/api/workspaces/${id}`),
+  purgeEmptyWorkspaces: () => apiClient.post('/api/workspaces/purge-empty'),
 
   // Sources (scoped by workspaceId)
   listSources: (workspaceId = null) =>

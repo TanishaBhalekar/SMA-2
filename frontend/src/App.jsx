@@ -39,7 +39,19 @@ function AppContent() {
     setLoadingStats(true);
     try {
       await detectActiveBackend();
-      const res = await api.getStats(currentWorkspace?.id);
+      setBackendOnline(true);
+      if (currentWorkspace?.isDraft || !currentWorkspace?.id) {
+        setStats({
+          total_sources: 0,
+          sources_indexed: 0,
+          total_attributes: 0,
+          unique_normalized_values: 0,
+          master_entities: 0,
+          multi_hop_links: 0,
+        });
+        return;
+      }
+      const res = await api.getStats(currentWorkspace.id);
       if (res.data) {
         setStats({
           total_sources: res.data.total_sources ?? 0,
@@ -49,7 +61,6 @@ function AppContent() {
           master_entities: res.data.master_entities ?? 0,
           multi_hop_links: res.data.links_discovered ?? 0,
         });
-        setBackendOnline(true);
       }
     } catch (err) {
       console.warn('Backend probe warning:', err);
@@ -61,7 +72,7 @@ function AppContent() {
 
   useEffect(() => {
     fetchStats();
-  }, [currentWorkspace?.id]);
+  }, [currentWorkspace?.id, currentWorkspace?.isDraft]);
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200">

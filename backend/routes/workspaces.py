@@ -104,17 +104,34 @@ def create_workspace(
 
 @router.get("", response_model=List[WorkspaceResponse])
 def list_workspaces(
+    include_empty: bool = False,
+    cleanup: bool = False,
     db: Session = Depends(get_db)
 ):
     """
-    Lists all saved past sessions along with aggregated statistics
+    Lists saved past sessions along with aggregated statistics
     (total sources count, total records ingested, discovered entities, etc.).
+    By default, only returns workspaces that have sources_count > 0.
+    If cleanup=True, automatically purges empty orphan workspaces before listing.
     """
-    workspaces = db.query(Workspace).order_by(Workspace.created_at.desc()).all()
+    if cleanup:
+        empty_workspaces = db.query(Workspace).filter(~Workspace.sources.any()).all()
+        for ws in empty_workspaces:
+            db.delete(ws)
+        if empty_workspaces:
+            db.commit()
+
+    query = db.query(Workspace)
+    if not include_empty:
+        query = query.filter(Workspace.sources.any())
+
+    workspaces = query.order_by(Workspace.created_at.desc()).all()
     results = []
 
     for ws in workspaces:
         stats = _get_workspace_stats(db, ws.id)
+        if not include_empty and stats["total_sources"] == 0:
+            continue
         results.append(
             WorkspaceResponse(
                 id=ws.id,
@@ -131,6 +148,27 @@ def list_workspaces(
         )
 
     return results
+
+
+@router.post("/purge-empty", status_code=status.HTTP_200_OK)
+@router.delete("/purge-empty", status_code=status.HTTP_200_OK)
+def purge_empty_workspaces(
+    db: Session = Depends(get_db)
+):
+    """
+    Purges all empty orphan workspaces (workspaces having 0 sources).
+    """
+    empty_workspaces = db.query(Workspace).filter(~Workspace.sources.any()).all()
+    purged_count = len(empty_workspaces)
+    for ws in empty_workspaces:
+        db.delete(ws)
+    db.commit()
+
+    return {
+        "status": "success",
+        "purged_count": purged_count,
+        "message": f"Successfully purged {purged_count} empty session(s)."
+    }
 
 
 @router.get("/{workspace_id}", response_model=WorkspaceDetailResponse)

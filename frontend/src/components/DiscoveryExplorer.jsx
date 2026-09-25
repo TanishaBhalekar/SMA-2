@@ -22,8 +22,15 @@ export default function DiscoveryExplorer({ onNavigateToSources }) {
     setError(null);
     setExecutedSeed({ field: fieldType, value: val.trim() });
 
+    if (currentWorkspace?.isDraft || !currentWorkspace?.id) {
+      setDiscoveryResult(null);
+      setError('Active session is currently a draft with no uploaded datasets yet. Upload a dataset in "Source & Ingestion" to begin entity graph discovery.');
+      setLoading(false);
+      return;
+    }
+
     try {
-      const res = await api.searchEntity(fieldType, val.trim(), currentWorkspace?.id);
+      const res = await api.searchEntity(fieldType, val.trim(), currentWorkspace.id);
       setDiscoveryResult(res.data);
     } catch (err) {
       console.error('Search failed:', err);
@@ -61,6 +68,11 @@ export default function DiscoveryExplorer({ onNavigateToSources }) {
             <span className="font-semibold text-slate-900 dark:text-white truncate max-w-[160px]">
               {currentWorkspace?.name || 'Active Session'}
             </span>
+            {currentWorkspace?.isDraft && (
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                Draft
+              </span>
+            )}
           </div>
         </div>
 

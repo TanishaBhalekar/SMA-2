@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { api, detectActiveBackend } from '../api/client';
 
 const WorkspaceContext = createContext(null);
@@ -8,6 +8,7 @@ export function WorkspaceProvider({ children }) {
   const [workspaces, setWorkspaces] = useState([]);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(true);
   const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
+  const persistingPromiseRef = useRef(null);
 
   // Format default session name using current local timestamp
   const getDefaultSessionName = () => {
@@ -18,7 +19,30 @@ export function WorkspaceProvider({ children }) {
     return `Session - ${dateStr} ${timeStr}`;
   };
 
-  // Fetch all workspaces and their aggregated stats
+  // Construct a pristine in-memory draft session
+  const createDraftWorkspace = (customName = null, customDesc = null) => ({
+    id: null,
+    name: customName?.trim() || getDefaultSessionName(),
+    description: customDesc || 'Interactive Progressive Ingestion Session',
+    isDraft: true,
+    total_sources: 0,
+    total_records: 0,
+    total_attributes_indexed: 0,
+    master_entities: 0,
+    links_discovered: 0,
+    created_at: new Date().toISOString(),
+    sources: [],
+    stats: {
+      total_sources: 0,
+      total_records: 0,
+      total_attributes_indexed: 0,
+      master_entities: 0,
+      links_discovered: 0,
+      multi_hop_links: 0,
+    },
+  });
+
+  // Fetch all saved workspaces and their aggregated stats
   const refreshWorkspaces = useCallback(async () => {
     try {
       const res = await api.listWorkspaces();
@@ -31,33 +55,49 @@ export function WorkspaceProvider({ children }) {
     }
   }, []);
 
-  // Create a brand new clean session
-  const createNewWorkspace = async (customName = null, customDesc = null) => {
-    setLoadingWorkspaces(true);
-    try {
-      const name = customName?.trim() || getDefaultSessionName();
-      const res = await api.createWorkspace({
-        name,
-        description: customDesc || 'Interactive Progressive Ingestion Session'
-      });
-      const newWs = res.data;
-
-      // Update active workspace
-      setCurrentWorkspace(newWs);
-      localStorage.setItem('active_workspace_id', newWs.id);
-
-      // Refresh list
-      await refreshWorkspaces();
-      return newWs;
-    } catch (err) {
-      console.error('Failed to create new session:', err);
-      throw err;
-    } finally {
-      setLoadingWorkspaces(false);
-    }
+  // Initialize a new local draft session in React state (no SQLite row created)
+  const createNewWorkspace = (customName = null, customDesc = null) => {
+    const draft = createDraftWorkspace(customName, customDesc);
+    setCurrentWorkspace(draft);
+    localStorage.removeItem('active_workspace_id');
+    return draft;
   };
 
-  // Switch to a past session
+  // Lazily persist the draft session to SQLite on first upload or confirmed ingestion
+  const ensurePersistedWorkspace = async () => {
+    if (currentWorkspace?.id && !currentWorkspace?.isDraft) {
+      return currentWorkspace;
+    }
+
+    if (persistingPromiseRef.current) {
+      return persistingPromiseRef.current;
+    }
+
+    persistingPromiseRef.current = (async () => {
+      try {
+        const name = currentWorkspace?.name?.trim() || getDefaultSessionName();
+        const description = currentWorkspace?.description || 'Interactive Progressive Ingestion Session';
+        const res = await api.createWorkspace({
+          name,
+          description,
+        });
+        const newWs = res.data;
+        setCurrentWorkspace(newWs);
+        localStorage.setItem('active_workspace_id', newWs.id);
+        await refreshWorkspaces();
+        return newWs;
+      } catch (err) {
+        console.error('Failed to persist draft workspace:', err);
+        throw err;
+      } finally {
+        persistingPromiseRef.current = null;
+      }
+    })();
+
+    return persistingPromiseRef.current;
+  };
+
+  // Switch to a past persisted session
   const switchWorkspace = async (workspaceId) => {
     setLoadingWorkspaces(true);
     try {
@@ -70,18 +110,25 @@ export function WorkspaceProvider({ children }) {
       return wsData;
     } catch (err) {
       console.error('Failed to switch workspace:', err);
-      // Fallback to fresh session if selected session is missing
-      return await createNewWorkspace();
+      // Fallback to fresh local draft if selected session is missing
+      return createNewWorkspace();
     } finally {
       setLoadingWorkspaces(false);
     }
   };
 
-  // Rename a session
+  // Rename a session (updates local draft state or updates DB if persisted)
   const renameWorkspace = async (workspaceId, newName) => {
     if (!newName?.trim()) return;
+    const trimmed = newName.trim();
+
+    if (currentWorkspace?.isDraft || !workspaceId || (currentWorkspace?.id === workspaceId && currentWorkspace?.isDraft)) {
+      setCurrentWorkspace((prev) => ({ ...prev, name: trimmed }));
+      return { ...(currentWorkspace || {}), name: trimmed, isDraft: true };
+    }
+
     try {
-      const res = await api.updateWorkspace(workspaceId, { name: newName.trim() });
+      const res = await api.updateWorkspace(workspaceId, { name: trimmed });
       const updated = res.data;
       if (currentWorkspace?.id === workspaceId) {
         setCurrentWorkspace((prev) => ({ ...prev, name: updated.name }));
@@ -96,20 +143,48 @@ export function WorkspaceProvider({ children }) {
 
   // Delete a session with cascade
   const deleteWorkspace = async (workspaceId) => {
+    if (!workspaceId) {
+      createNewWorkspace();
+      return;
+    }
     try {
       await api.deleteWorkspace(workspaceId);
       const updatedList = await refreshWorkspaces();
 
-      // If active session was deleted, switch to another or create a clean one
+      // If active session was deleted, switch to another or start a clean draft
       if (currentWorkspace?.id === workspaceId) {
         if (updatedList.length > 0) {
           await switchWorkspace(updatedList[0].id);
         } else {
-          await createNewWorkspace();
+          createNewWorkspace();
         }
       }
     } catch (err) {
       console.error('Failed to delete workspace:', err);
+      throw err;
+    }
+  };
+
+  // Purge all empty orphan sessions (workspaces with 0 sources)
+  const purgeEmptySessions = async () => {
+    try {
+      const res = await api.purgeEmptyWorkspaces();
+      const updatedList = await refreshWorkspaces();
+
+      // If active workspace was an empty persisted workspace that got purged
+      if (currentWorkspace?.id && !currentWorkspace?.isDraft) {
+        const stillExists = updatedList.some((w) => w.id === currentWorkspace.id);
+        if (!stillExists) {
+          if (updatedList.length > 0) {
+            await switchWorkspace(updatedList[0].id);
+          } else {
+            createNewWorkspace();
+          }
+        }
+      }
+      return res.data;
+    } catch (err) {
+      console.error('Failed to purge empty workspaces:', err);
       throw err;
     }
   };
@@ -134,12 +209,15 @@ export function WorkspaceProvider({ children }) {
         }
 
         // Clean default landing experience:
-        // If no saved active session exists, start with a pristine clean session canvas
+        // If no saved active session exists, start with a pristine clean local Draft (no DB write)
         if (mounted) {
-          await createNewWorkspace();
+          createNewWorkspace();
         }
       } catch (err) {
         console.error('Error during workspace context initialization:', err);
+        if (mounted) {
+          createNewWorkspace();
+        }
       } finally {
         if (mounted) setLoadingWorkspaces(false);
       }
@@ -158,8 +236,10 @@ export function WorkspaceProvider({ children }) {
     refreshWorkspaces,
     switchWorkspace,
     createNewWorkspace,
+    ensurePersistedWorkspace,
     renameWorkspace,
     deleteWorkspace,
+    purgeEmptySessions,
   };
 
   return (

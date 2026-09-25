@@ -23,8 +23,8 @@ export default function Header({ activeTab, setActiveTab, darkMode, setDarkMode,
   };
 
   const handleSaveRename = async () => {
-    if (sessionNameInput.trim() && currentWorkspace?.id) {
-      await renameWorkspace(currentWorkspace.id, sessionNameInput.trim());
+    if (sessionNameInput.trim()) {
+      await renameWorkspace(currentWorkspace?.id, sessionNameInput.trim());
     }
     setIsEditingName(false);
   };
@@ -126,13 +126,18 @@ export default function Header({ activeTab, setActiveTab, darkMode, setDarkMode,
                   </button>
                 </div>
               ) : (
-                <div className="flex items-center gap-1.5 max-w-[170px]">
+                <div className="flex items-center gap-1.5 max-w-[200px]">
                   <span className="truncate font-semibold text-slate-800 dark:text-slate-200" title={currentWorkspace?.name || 'Active Session'}>
                     {currentWorkspace?.name || 'Active Session'}
                   </span>
+                  {currentWorkspace?.isDraft && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800 flex-shrink-0">
+                      Draft
+                    </span>
+                  )}
                   <button
                     onClick={handleStartRename}
-                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors p-0.5"
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors p-0.5 flex-shrink-0"
                     title="Rename current session"
                   >
                     <Edit2 className="w-3 h-3" />
