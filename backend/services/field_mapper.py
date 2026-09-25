@@ -32,7 +32,8 @@ IDENTIFIER_FIELDS = {"email", "phone", "username"}
 SYNONYM_MAP = {
     "name": [
         "name", "full_name", "fullname", "display_name", "client_name",
-        "customer_name", "employee_name", "person_name", "emp_name", "primary_contact"
+        "customer_name", "employee_name", "person_name", "emp_name", "primary_contact",
+        "patient_name", "contact_name", "agent_name", "staff_name"
     ],
     "email": [
         "email", "email_id", "email_address", "e_mail", "mail", "user_email",
@@ -73,6 +74,32 @@ SYNONYM_MAP = {
         "rewards_tier", "membership_level", "loyalty"
     ]
 }
+
+
+def _is_human_name_sample(val: Any) -> bool:
+    """Detect if sample string represents a probable human personal name (e.g. 'Rohit Sen')."""
+    if val is None:
+        return False
+    clean = str(val).strip()
+    if not clean or len(clean) < 3 or len(clean) > 60:
+        return False
+    if "@" in clean or "http://" in clean or "https://" in clean or "www." in clean:
+        return False
+    if re.search(r"\d", clean):
+        return False
+    stripped = re.sub(r"^(?:mr|mrs|ms|miss|dr|prof|er|shri|smt)\.?\s+", "", clean, flags=re.IGNORECASE).strip()
+    tokens = stripped.split()
+    if 2 <= len(tokens) <= 4:
+        if all(re.match(r"^[A-Za-z\.\'\-]+$", t) and len(t) >= 1 for t in tokens):
+            lower_tokens = [t.lower() for t in tokens]
+            status_words = {
+                "active", "inactive", "pending", "failed", "completed", "standard",
+                "gold", "silver", "platinum", "tier", "true", "false", "unknown", "null", "none"
+            }
+            if any(t in status_words for t in lower_tokens):
+                return False
+            return True
+    return False
 
 
 def _rule_based_match(col_name: str, sample_values: List[Any]) -> Optional[Dict[str, Any]]:
@@ -140,16 +167,50 @@ def _rule_based_match(col_name: str, sample_values: List[Any]) -> Optional[Dict[
         }
 
     # 5. Name rule
-    if (
-        col_clean in ("full_name", "name", "primary_contact", "display_name", "client_name", "customer_name", "contact_name", "person_name", "fullname")
-        or col_clean.endswith(("full_name", "primary_contact"))
-    ):
+    # Recognize variations: name, full_name, patient_name, customer_name, client_name,
+    # primary_contact, contact_name, employee_name, agent_name, staff_name
+    NAME_PATTERNS = {
+        "name", "full_name", "fullname", "patient_name", "customer_name",
+        "client_name", "primary_contact", "contact_name", "employee_name",
+        "agent_name", "staff_name", "person_name", "display_name", "emp_name"
+    }
+    NAME_REGEX = re.compile(
+        r"(?:^|_)(?:full_?name|patient_?name|customer_?name|client_?name|primary_?contact|contact_?name|employee_?name|agent_?name|staff_?name|person_?name)(?:$|_)",
+        re.IGNORECASE
+    )
+    is_name_match = (
+        col_clean in NAME_PATTERNS
+        or bool(NAME_REGEX.search(col_clean))
+        or (
+            col_clean.endswith(("_name", "name"))
+            and not col_clean.endswith((
+                "company_name", "org_name", "organization_name", "business_name",
+                "firm_name", "brand_name", "user_name", "username", "account_name",
+                "table_name", "file_name", "col_name", "column_name"
+            ))
+        )
+    )
+    if is_name_match:
         return {
             "canonical_field": "name",
-            "confidence": 0.95,
+            "confidence": 0.98,
             "method": "rule_based",
-            "reasoning": f"Column '{col_name}' matched person/contact name."
+            "reasoning": f"Column '{col_name}' matched human person/contact name."
         }
+
+    # Fuzzy match check for name variations
+    try:
+        from rapidfuzz import fuzz
+        for name_var in ("name", "full_name", "patient_name", "customer_name", "client_name", "primary_contact", "contact_name", "employee_name", "agent_name", "staff_name"):
+            if fuzz.ratio(col_clean, name_var) >= 85:
+                return {
+                    "canonical_field": "name",
+                    "confidence": 0.92,
+                    "method": "fuzzy_match",
+                    "reasoning": f"Column '{col_name}' fuzzy-matched person name variation '{name_var}'."
+                }
+    except Exception:
+        pass
 
     # 6. Company rule
     if (
@@ -205,6 +266,14 @@ def _rule_based_match(col_name: str, sample_values: List[Any]) -> Optional[Dict[
                     "confidence": 0.85,
                     "method": "rule_based",
                     "reasoning": f"Sample values in '{col_name}' conform to standard phone format."
+                }
+            # Detect personal names (e.g. 'Rohit Sen', 'Rahul Sharma') in novel/unmapped datasets
+            if all(_is_human_name_sample(s) for s in valid_samples):
+                return {
+                    "canonical_field": "name",
+                    "confidence": 0.88,
+                    "method": "rule_based",
+                    "reasoning": f"Sample values in '{col_name}' (e.g. '{valid_samples[0]}') conform to personal name format."
                 }
 
     return None

@@ -13,6 +13,19 @@ HONORIFICS_REGEX = re.compile(
 )
 
 
+def normalize_phone(val: Any) -> str:
+    if not val:
+        return ""
+    # Strip all non-digit characters
+    digits = re.sub(r'\D', '', str(val))
+    # Standardize international and trunk prefixes
+    if len(digits) == 12 and digits.startswith('91'):
+        digits = digits[-10:]
+    elif len(digits) == 11 and digits.startswith(('1', '0')):
+        digits = digits[-10:]
+    return digits
+
+
 def normalize_field(field_type: str, value: Any) -> str:
     """
     Normalizes a given field value based on its target canonical type according to
@@ -23,8 +36,7 @@ def normalize_field(field_type: str, value: Any) -> str:
       - 'phone':
           - Strip all non-digit characters: digits = re.sub(r'\\D', '', str(val))
           - If len == 12 and starts with '91' (India), take digits[-10:]
-          - If len == 11 and starts with '1' (US/Canada), take digits[-10:]
-          - If len == 11 and starts with '0' (trunk code), take digits[-10:]
+          - If len == 11 and starts with ('1', '0'), take digits[-10:]
           - Guarantees "+91 98765 10001", "98765-10001", and "+919876510001" normalize identically to "9876510001".
       - 'username':
           - Strip whitespace, lowercase, remove leading '@':
@@ -46,18 +58,7 @@ def normalize_field(field_type: str, value: Any) -> str:
         return val_str.strip().lower()
 
     elif ftype == "phone":
-        digits = re.sub(r"\D", "", val_str)
-        if len(digits) == 12 and digits.startswith("91"):
-            digits = digits[-10:]
-        elif len(digits) == 11 and digits.startswith("1"):
-            digits = digits[-10:]
-        elif len(digits) == 11 and digits.startswith("0"):
-            digits = digits[-10:]
-        elif len(digits) > 10 and digits.startswith("091"):
-            digits = digits[-10:]
-        elif len(digits) > 10 and (digits.startswith("91") or digits.startswith("0")):
-            digits = digits[-10:]
-        return digits
+        return normalize_phone(val_str)
 
     elif ftype == "username":
         return re.sub(r"[^a-zA-Z0-9_\.]", "", val_str.strip().lower().lstrip("@"))

@@ -19,7 +19,7 @@ from backend.models import (
     EntityAttribute,
     EnrichmentHop
 )
-from backend.services.normalizer import normalize_field
+from backend.services.normalizer import normalize_field, normalize_phone
 from backend.services.field_mapper import CANONICAL_FIELDS, IDENTIFIER_FIELDS, SYNONYM_MAP
 
 # Whitelisted Default Identifiers: ONLY email, phone, and username can form match edges.
@@ -92,6 +92,10 @@ def count_cross_source_links(workspace_id: str, db: Session) -> int:
     ident_to_records: Dict[Tuple[str, str], List[Tuple[int, int]]] = defaultdict(list)
     for s_id, r_idx, field, norm_val in attrs:
         val = (norm_val or "").strip()
+        if field == "phone":
+            val = normalize_phone(val)
+        elif field == "email":
+            val = val.lower()
         if val:
             ident_to_records[(field, val)].append((s_id, r_idx))
 
@@ -148,12 +152,12 @@ def select_authoritative_profile(collected_attributes: List[Dict[str, Any]]) -> 
     ]
     best_phone = ""
     for ph in phone_candidates:
-        norm = normalize_field("phone", ph)
+        norm = normalize_phone(ph)
         if len(norm) == 10:
             best_phone = norm
             break
     if not best_phone and phone_candidates:
-        best_phone = normalize_field("phone", phone_candidates[0])
+        best_phone = normalize_phone(phone_candidates[0])
 
     # 3. Authoritative Email: Trimmed, lowercased RFC email
     email_candidates = [
@@ -253,6 +257,10 @@ def resolve_workspace_entities(workspace_id: str, db: Session) -> Dict[str, Any]
         is_ident = attr.is_identifier and (attr.canonical_field in MATCH_IDENTIFIER_FIELDS) and (attr.canonical_field != "source_record_id")
         if is_ident:
             norm_val = (attr.normalized_value or attr.original_value or "").strip()
+            if attr.canonical_field == "phone":
+                norm_val = normalize_phone(norm_val)
+            elif attr.canonical_field == "email":
+                norm_val = norm_val.lower()
             if norm_val:
                 ident_to_records[(attr.canonical_field, norm_val)].append(rec_key)
 
@@ -333,7 +341,11 @@ def resolve_workspace_entities(workspace_id: str, db: Session) -> Dict[str, Any]
         if candidate_ids:
             entity_id = candidate_ids[0]
         else:
-            entity_id = f"ENT-{uuid.uuid4().hex[:6].upper()}"
+            while True:
+                cand = f"ENT-{uuid.uuid4().hex[:8].upper()}"
+                if cand not in used_entity_ids and not db.query(MasterEntity).filter_by(id=cand).first():
+                    entity_id = cand
+                    break
 
         used_entity_ids.add(entity_id)
 
@@ -358,9 +370,10 @@ def resolve_workspace_entities(workspace_id: str, db: Session) -> Dict[str, Any]
             or f"Entity #{len(used_entity_ids)}"
         )
 
-        # Upsert MasterEntity
-        if entity_id in prior_entity_map:
-            master_entity = prior_entity_map[entity_id]
+        # Upsert MasterEntity cleanly
+        master_entity = prior_entity_map.get(entity_id) or db.query(MasterEntity).filter_by(id=entity_id).first()
+        if master_entity:
+            master_entity.workspace_id = workspace_id
             master_entity.canonical_name = master_name
             master_entity.updated_at = now_utc
         else:
@@ -459,13 +472,23 @@ def progressive_enrich(
         target_entity = None
 
         # 1. Exact match by normalized value or original value in EntityAttribute
-        attr_match = db.query(EntityAttribute).join(
-            MasterEntity, EntityAttribute.entity_id == MasterEntity.id
-        ).filter(
-            MasterEntity.workspace_id == workspace_id,
-            EntityAttribute.canonical_field == canonical_seed_field,
-            (EntityAttribute.normalized_value == norm_seed_value) | (EntityAttribute.original_value == seed_value)
-        ).first()
+        if canonical_seed_field == "phone":
+            norm_phone = normalize_phone(seed_value)
+            attr_match = db.query(EntityAttribute).join(
+                MasterEntity, EntityAttribute.entity_id == MasterEntity.id
+            ).filter(
+                MasterEntity.workspace_id == workspace_id,
+                EntityAttribute.canonical_field == "phone",
+                (EntityAttribute.normalized_value == norm_phone) | (EntityAttribute.original_value == seed_value)
+            ).first()
+        else:
+            attr_match = db.query(EntityAttribute).join(
+                MasterEntity, EntityAttribute.entity_id == MasterEntity.id
+            ).filter(
+                MasterEntity.workspace_id == workspace_id,
+                EntityAttribute.canonical_field == canonical_seed_field,
+                (EntityAttribute.normalized_value == norm_seed_value) | (EntityAttribute.original_value == seed_value)
+            ).first()
 
         if not attr_match and canonical_seed_field == "name":
             # Case-insensitive name match
@@ -582,10 +605,17 @@ def progressive_enrich(
     while search_queue:
         curr_field, curr_val = search_queue.popleft()
 
-        attr_query = db.query(AttributeIndex).filter(
-            AttributeIndex.canonical_field == curr_field,
-            (AttributeIndex.normalized_value == curr_val) | (AttributeIndex.original_value == curr_val)
-        )
+        if curr_field == "phone":
+            norm_curr = normalize_phone(curr_val)
+            attr_query = db.query(AttributeIndex).filter(
+                AttributeIndex.canonical_field == "phone",
+                (AttributeIndex.normalized_value == norm_curr) | (AttributeIndex.original_value == curr_val)
+            )
+        else:
+            attr_query = db.query(AttributeIndex).filter(
+                AttributeIndex.canonical_field == curr_field,
+                (AttributeIndex.normalized_value == curr_val) | (AttributeIndex.original_value == curr_val)
+            )
         if workspace_id:
             attr_query = attr_query.filter(AttributeIndex.workspace_id == workspace_id)
         matching_rows = attr_query.all()
@@ -659,7 +689,12 @@ def progressive_enrich(
 
                 is_ident = sib.is_identifier or (sib.canonical_field in MATCH_IDENTIFIER_FIELDS)
                 if is_ident and (sib.canonical_field in MATCH_IDENTIFIER_FIELDS) and (sib.canonical_field != "source_record_id"):
-                    ident_key = (sib.canonical_field, sib.normalized_value)
+                    val = sib.normalized_value or sib.original_value or ""
+                    if sib.canonical_field == "phone":
+                        val = normalize_phone(val)
+                    elif sib.canonical_field == "email":
+                        val = val.lower()
+                    ident_key = (sib.canonical_field, val)
                     if ident_key not in visited_identifiers:
                         visited_identifiers.add(ident_key)
                         search_queue.append(ident_key)

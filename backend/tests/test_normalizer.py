@@ -105,7 +105,7 @@ def test_field_mapper_rule_based():
 
 
 def test_field_mapper_fallback_unmapped():
-    """Verify fallback to custom (50% confidence) for unrecognized columns."""
+    """Verify fallback to metadata for unrecognized columns without name/email/phone samples."""
     columns = ["arbitrary_metric_x", "registered_ip"]
     sample_rows = [
         {"arbitrary_metric_x": 42.5, "registered_ip": "10.0.0.1"},
@@ -117,3 +117,44 @@ def test_field_mapper_fallback_unmapped():
     assert mappings["arbitrary_metric_x"]["canonical_field"] in ("metadata", "custom")
     assert mappings["arbitrary_metric_x"]["is_identifier"] is False
     assert mappings["arbitrary_metric_x"]["method"] == "fallback"
+
+
+def test_name_mapping_variations():
+    """Verify that all specified name variations reliably map to canonical 'name'."""
+    from backend.services.field_mapper import suggest_mappings
+    name_cols = [
+        "name", "full_name", "patient_name", "customer_name", "client_name",
+        "primary_contact", "contact_name", "employee_name", "agent_name", "staff_name"
+    ]
+    sample_rows = [{col: "Test User" for col in name_cols}]
+    mappings = suggest_mappings(name_cols, sample_rows)
+
+    for col in name_cols:
+        assert mappings[col]["canonical_field"] == "name", f"Column '{col}' did not map to 'name': {mappings[col]}"
+        assert mappings[col]["is_identifier"] is False
+
+
+def test_novel_dataset_rohit_sen_sample_maps_to_name():
+    """Verify that novel/unmapped column headers with sample 'Rohit Sen' map to canonical 'name' rather than 'metadata'."""
+    from backend.services.field_mapper import suggest_mappings
+    columns = ["unknown_lead_profile"]
+    sample_rows = [{"unknown_lead_profile": "Rohit Sen"}]
+    mappings = suggest_mappings(columns, sample_rows)
+
+    assert mappings["unknown_lead_profile"]["canonical_field"] == "name"
+    assert mappings["unknown_lead_profile"]["is_identifier"] is False
+
+
+def test_universal_normalize_phone_function():
+    """Verify normalize_phone logic adheres strictly to standard."""
+    from backend.services.normalizer import normalize_phone
+
+    assert normalize_phone("+91 98765 10001") == "9876510001"
+    assert normalize_phone("98765-10001") == "9876510001"
+    assert normalize_phone("+919876510001") == "9876510001"
+    assert normalize_phone("09876510001") == "9876510001"
+    assert normalize_phone("1-800-555-0199") == "8005550199"
+    assert normalize_phone("9876510001") == "9876510001"
+    assert normalize_phone("") == ""
+    assert normalize_phone(None) == ""
+
