@@ -15,17 +15,22 @@ from sqlalchemy.orm import Session
 from backend.database import SessionLocal
 from backend.models import Source, SourceColumn, AttributeIndex
 from backend.services.normalizer import normalize_field
-from backend.services.field_mapper import suggest_mappings
+from backend.services.field_mapper import (
+    suggest_mappings,
+    detect_column_mapping,
+    is_name_like_value,
+    tokenize_header
+)
 
 
-def extract_column_samples(file_path: str, columns: List[str], source_type: str = "CSV", max_samples: int = 3) -> Dict[str, List[str]]:
+def extract_column_samples(file_path: str, columns: List[str], source_type: str = "CSV", max_samples: int = 5) -> Dict[str, List[str]]:
     """
-    Extracts up to max_samples real non-null sample values for each column.
+    Extracts up to max_samples (default: 5) non-null, non-empty real sample values for each column.
     """
     col_samples: Dict[str, List[str]] = {c: [] for c in columns}
     try:
         if source_type.upper() == "CSV":
-            df = pd.read_csv(file_path, nrows=25, dtype=str, keep_default_na=False)
+            df = pd.read_csv(file_path, nrows=100, dtype=str, keep_default_na=False)
             for c in columns:
                 if c in df.columns:
                     for val in df[c]:
@@ -35,7 +40,7 @@ def extract_column_samples(file_path: str, columns: List[str], source_type: str 
                         if len(col_samples[c]) >= max_samples:
                             break
         elif source_type.upper() == "SQL":
-            for chunk in stream_sql_records(file_path, columns, chunksize=25):
+            for chunk in stream_sql_records(file_path, columns, chunksize=100):
                 for row in chunk:
                     for c in columns:
                         v = row.get(c)
@@ -43,7 +48,8 @@ def extract_column_samples(file_path: str, columns: List[str], source_type: str 
                             v_str = str(v).strip()
                             if v_str and v_str.lower() != "nan" and v_str not in col_samples[c]:
                                 col_samples[c].append(v_str)
-                break
+                if all(len(col_samples[c]) >= max_samples for c in columns):
+                    break
     except Exception:
         pass
     return col_samples

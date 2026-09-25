@@ -158,3 +158,103 @@ def test_universal_normalize_phone_function():
     assert normalize_phone("") == ""
     assert normalize_phone(None) == ""
 
+
+def test_token_analysis_name_vs_negative_company_tokens():
+    """
+    Verify:
+      - Headers with name tokens WITHOUT negative company tokens map to 'name'.
+      - Headers with negative company tokens map to 'company', not 'name'.
+      - is_identifier is strictly False for name.
+    """
+    from backend.services.field_mapper import suggest_mappings
+
+    name_tokens = [
+        "name", "fullname", "fname", "lname", "contact", "person",
+        "patient", "client", "customer", "employee", "agent", "staff",
+        "lead", "owner"
+    ]
+    sample_rows = [{t: "Sample Value" for t in name_tokens}]
+    mappings = suggest_mappings(name_tokens, sample_rows)
+
+    for t in name_tokens:
+        assert mappings[t]["canonical_field"] == "name", f"Token '{t}' did not map to 'name'"
+        assert mappings[t]["is_identifier"] is False, f"Name field for '{t}' must have is_identifier=False"
+
+    # Negative company tokens should NOT map to name
+    company_cols = ["company_name", "org_name", "vendor_name", "hospital_name", "firm_name"]
+    comp_mappings = suggest_mappings(company_cols, [{c: "Acme Corp" for c in company_cols}])
+    for c in company_cols:
+        assert comp_mappings[c]["canonical_field"] == "company", f"Column '{c}' should map to 'company', not 'name'"
+        assert comp_mappings[c]["is_identifier"] is False
+
+
+def test_arbitrary_headers_cell_pattern_analysis_ratio():
+    """
+    Verify:
+      - Non-standard headers (e.g. 'n_nom', 'p_lead', 'rep') with >=60% spaced alphabetic names
+        (e.g. 'Rohit Sen', 'Aarav Patel') map automatically to 'name'.
+      - is_identifier is strictly False.
+    """
+    from backend.services.field_mapper import suggest_mappings
+
+    cols = ["n_nom", "p_lead", "rep"]
+    col_samples = {
+        "n_nom": ["Rohit Sen", "Aarav Patel", "Rahul Sharma", "Pooja Roy", "V. Kumar"], # 100% names
+        "p_lead": ["Amit Kumar", "Dr. Sunita Rao", "Kavita Reddy", "Unknown", "None"], # 3/5 = 60% names
+        "rep": ["Priya Mehta", "Devendra Verma", "Cody Garrett", "A. B. Singh", "Rajesh Jain"], # 100% names
+    }
+
+    mappings = suggest_mappings(cols, [], column_samples=col_samples)
+
+    for c in cols:
+        assert mappings[c]["canonical_field"] == "name", f"Arbitrary header '{c}' failed to map to 'name': {mappings[c]}"
+        assert mappings[c]["is_identifier"] is False
+        assert mappings[c]["confidence"] >= 0.85
+
+
+def test_safe_identifier_isolation_and_source_record_id():
+    """
+    Verify:
+      - ONLY 'email', 'phone', and 'username' have is_identifier=True.
+      - Columns ending in _id, _code, _num map to 'source_record_id' with is_identifier=False.
+      - 'address', 'company', 'metadata' have is_identifier=False.
+    """
+    from backend.services.field_mapper import suggest_mappings
+
+    cols = [
+        "patient_id", "client_code", "record_num", "user_email", "contact_phone",
+        "user_handle", "shipping_address", "employer_company", "profile_status"
+    ]
+    sample_rows = [{
+        "patient_id": "P101",
+        "client_code": "CL-88",
+        "record_num": "99401",
+        "user_email": "test@example.com",
+        "contact_phone": "9876543210",
+        "user_handle": "johndoe",
+        "shipping_address": "123 Main St",
+        "employer_company": "Initech",
+        "profile_status": "Active"
+    }]
+
+    mappings = suggest_mappings(cols, sample_rows)
+
+    # _id, _code, _num
+    assert mappings["patient_id"]["canonical_field"] == "source_record_id"
+    assert mappings["patient_id"]["is_identifier"] is False
+    assert mappings["client_code"]["canonical_field"] == "source_record_id"
+    assert mappings["client_code"]["is_identifier"] is False
+    assert mappings["record_num"]["canonical_field"] == "source_record_id"
+    assert mappings["record_num"]["is_identifier"] is False
+
+    # Identifiers: email, phone, username
+    assert mappings["user_email"]["is_identifier"] is True
+    assert mappings["contact_phone"]["is_identifier"] is True
+    assert mappings["user_handle"]["is_identifier"] is True
+
+    # Other non-identifiers
+    assert mappings["shipping_address"]["is_identifier"] is False
+    assert mappings["employer_company"]["is_identifier"] is False
+    assert mappings["profile_status"]["is_identifier"] is False
+
+

@@ -13,7 +13,7 @@ const CANONICAL_OPTIONS = [
   { value: 'email', label: 'Email (Primary Email)' },
   { value: 'phone', label: 'Phone (Mobile / Contact)' },
   { value: 'username', label: 'Username (Platform Handle)' },
-  { value: 'source_record_id', label: 'Source Record ID (Identifier)' },
+  { value: 'source_record_id', label: 'Source Record ID (Tracking Key)' },
   { value: 'member_id', label: 'Member ID (Loyalty / Club)' },
   { value: 'address', label: 'Address (Location / City)' },
   { value: 'company', label: 'Company (Employer / Org)' },
@@ -216,7 +216,7 @@ export default function SourceManager({ onSourcesChanged }) {
   const handleMappingChange = (col, newCanonical) => {
     setUploadState((prev) => {
       const curr = prev.mappings[col] || {};
-      const isIdent = ['email', 'phone', 'username', 'member_id', 'source_record_id'].includes(newCanonical);
+      const isIdent = ['email', 'phone', 'username'].includes(newCanonical);
       return {
         ...prev,
         mappings: {
@@ -233,10 +233,13 @@ export default function SourceManager({ onSourcesChanged }) {
     });
   };
 
-  // Toggle is_identifier checkbox
+  // Toggle is_identifier checkbox (Safe Identifier Isolation: ONLY email, phone, username can be toggled)
   const handleIdentifierToggle = (col) => {
     setUploadState((prev) => {
       const curr = prev.mappings[col] || {};
+      if (!['email', 'phone', 'username'].includes(curr.canonical_field)) {
+        return prev;
+      }
       return {
         ...prev,
         mappings: {
@@ -596,13 +599,23 @@ export default function SourceManager({ onSourcesChanged }) {
                               </select>
                             </td>
                             <td className="px-4 py-3">
-                              {isAi ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                              {mapping.method === 'token_analysis' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800" title={mapping.reasoning}>
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                                  Token Match ({scorePct}%)
+                                </span>
+                              ) : mapping.method === 'cell_value_pattern_analysis' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800" title={mapping.reasoning}>
+                                  <Sparkles className="w-3 h-3 text-purple-500" />
+                                  ✨ Pattern Match ({scorePct}%)
+                                </span>
+                              ) : isAi ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800" title={mapping.reasoning}>
                                   <Sparkles className="w-3 h-3 text-purple-500" />
                                   ✨ {scorePct}% AI Match
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800" title={mapping.reasoning}>
                                   <CheckCircle2 className="w-3 h-3 text-emerald-500" />
                                   Rule Matched ({scorePct}%)
                                 </span>
@@ -611,10 +624,11 @@ export default function SourceManager({ onSourcesChanged }) {
                             <td className="px-4 py-3 text-center">
                               <input
                                 type="checkbox"
-                                checked={mapping.is_identifier || false}
+                                checked={['email', 'phone', 'username'].includes(mapping.canonical_field) && (mapping.is_identifier || false)}
                                 onChange={() => handleIdentifierToggle(col)}
-                                disabled={['normalizing', 'indexing', 'completed'].includes(uploadState.stage)}
-                                className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
+                                disabled={!['email', 'phone', 'username'].includes(mapping.canonical_field) || ['normalizing', 'indexing', 'completed'].includes(uploadState.stage)}
+                                className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed"
+                                title={['email', 'phone', 'username'].includes(mapping.canonical_field) ? 'Toggle matching identifier' : 'Only email, phone, and username can be match identifiers'}
                               />
                             </td>
                           </tr>

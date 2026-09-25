@@ -111,8 +111,8 @@ async def upload_source(
             detail=f"Error inspecting file schema: {str(e)}"
         )
 
-    # Extract up to 3 real non-null sample values for each column
-    column_samples = extract_column_samples(str(saved_path), columns=columns, source_type=detected_type, max_samples=3)
+    # Extract up to 5 real non-null sample values for each column
+    column_samples = extract_column_samples(str(saved_path), columns=columns, source_type=detected_type, max_samples=5)
 
     # Generate mapping suggestions using canonical rules and real samples
     suggested_mappings = suggest_mappings(columns=columns, sample_rows=sample_rows, column_samples=column_samples)
@@ -165,14 +165,16 @@ def confirm_mapping(
     # Remove existing mappings if re-confirming
     db.query(SourceColumn).filter_by(source_id=source.id).delete()
 
-    # Save confirmed SourceColumn definitions
+    # Save confirmed SourceColumn definitions with Safe Identifier Isolation
     for orig_name, mapping in req.mappings.items():
+        # ONLY email, phone, and username can have is_identifier = True
+        is_ident = bool(mapping.canonical_field in ("email", "phone", "username") and mapping.is_identifier)
         col = SourceColumn(
             source_id=source.id,
             original_name=orig_name,
             canonical_field=mapping.canonical_field,
             confidence_score=mapping.confidence_score,
-            is_identifier=mapping.is_identifier
+            is_identifier=is_ident
         )
         db.add(col)
 
