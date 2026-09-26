@@ -10,13 +10,10 @@ export function WorkspaceProvider({ children }) {
   const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
   const persistingPromiseRef = useRef(null);
 
-  // Format default session name using current local timestamp
+  // Format default session name using current local browser time
   const getDefaultSessionName = () => {
-    const now = new Date();
-    const pad = (n) => String(n).padStart(2, '0');
-    const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-    const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
-    return `Session - ${dateStr} ${timeStr}`;
+    const localNow = new Date();
+    return `Session – ${localNow.toLocaleDateString()} ${localNow.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   };
 
   // Construct a pristine in-memory draft session

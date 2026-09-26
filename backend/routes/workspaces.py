@@ -67,11 +67,11 @@ def create_workspace(
 ):
     """
     Creates a new dynamic ingestion workspace / session.
-    Defaults name to 'Session - <Current Date/Time>' if omitted.
+    Defaults name to 'Session – <Current Date/Time>' if omitted.
     """
     now_utc = datetime.now(timezone.utc)
-    now_local_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-    session_name = req.name.strip() if (req.name and req.name.strip()) else f"Session - {now_local_str}"
+    default_name = f"Session – {now_utc.strftime('%Y-%m-%d %H:%M')}"
+    session_name = req.name.strip() if (req.name and req.name.strip()) else default_name
 
     ws_id = f"ws-{uuid.uuid4().hex[:8]}"
 
@@ -90,8 +90,8 @@ def create_workspace(
         id=workspace.id,
         name=workspace.name,
         description=workspace.description,
-        created_at=workspace.created_at,
-        updated_at=workspace.updated_at,
+        created_at=workspace.created_at_iso or workspace.created_at,
+        updated_at=workspace.updated_at_iso or workspace.updated_at,
         total_sources=0,
         total_records=0,
         total_attributes_indexed=0,
@@ -135,8 +135,8 @@ def list_workspaces(
                 id=ws.id,
                 name=ws.name,
                 description=ws.description,
-                created_at=ws.created_at,
-                updated_at=ws.updated_at,
+                created_at=ws.created_at_iso or ws.created_at,
+                updated_at=ws.updated_at_iso or ws.updated_at,
                 total_sources=stats["total_sources"],
                 total_records=stats["total_records"],
                 total_attributes_indexed=stats["total_attributes_indexed"],
@@ -191,8 +191,8 @@ def get_workspace(
         id=workspace.id,
         name=workspace.name,
         description=workspace.description,
-        created_at=workspace.created_at,
-        updated_at=workspace.updated_at,
+        created_at=workspace.created_at_iso or workspace.created_at,
+        updated_at=workspace.updated_at_iso or workspace.updated_at,
         sources=[SourceResponse.model_validate(s) for s in sources],
         stats=stats
     )
@@ -277,8 +277,8 @@ def update_workspace(
         id=workspace.id,
         name=workspace.name,
         description=workspace.description,
-        created_at=workspace.created_at,
-        updated_at=workspace.updated_at,
+        created_at=workspace.created_at_iso or workspace.created_at,
+        updated_at=workspace.updated_at_iso or workspace.updated_at,
         total_sources=stats["total_sources"],
         total_records=stats["total_records"],
         total_attributes_indexed=stats["total_attributes_indexed"],

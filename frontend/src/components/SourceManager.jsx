@@ -7,6 +7,7 @@ import {
 import { api } from '../api/client';
 import SourceBadge from './SourceBadge';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { formatSessionDate, formatSessionTitle } from '../utils/dateUtils';
 
 const CANONICAL_OPTIONS = [
   { value: 'name', label: 'Name (Person / Full Name)' },
@@ -152,7 +153,7 @@ export default function SourceManager({ onSourcesChanged }) {
       sampleRows: [],
       mappings: {},
       stage: 'uploading',
-      progressMessage: `Uploading ${filename} to session "${currentWorkspace?.name || 'Active'}"...`,
+      progressMessage: `Uploading ${filename} to session "${formatSessionTitle(currentWorkspace) || 'Active'}"...`,
       error: null,
     });
 
@@ -378,7 +379,7 @@ export default function SourceManager({ onSourcesChanged }) {
               </span>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-sm text-slate-900 dark:text-white">
-                  {currentWorkspace?.name || 'Loading Session...'}
+                  {formatSessionTitle(currentWorkspace) || 'Loading Session...'}
                 </span>
                 {currentWorkspace?.isDraft && (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
@@ -671,7 +672,7 @@ export default function SourceManager({ onSourcesChanged }) {
       )}
 
       {/* Ingested Datasets Table & Accordion */}
-      <div className="rounded-2xl p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+      <div className="rounded-2xl p-6 bg-white dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Layers className="w-4 h-4 text-indigo-500" />
@@ -757,7 +758,7 @@ export default function SourceManager({ onSourcesChanged }) {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-slate-500 dark:text-slate-400 font-mono text-[11px]">
-                          {s.created_at ? new Date(s.created_at).toLocaleDateString() : '—'}
+                          {s.created_at ? formatSessionDate(s.created_at) : '—'}
                         </td>
                         <td className="px-4 py-3 text-right">
                           <div className="flex items-center justify-end gap-2">

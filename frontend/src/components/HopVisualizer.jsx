@@ -35,7 +35,7 @@ export default function HopVisualizer({ hops = [], lineage = [], seed = { field:
   const stepList = Object.values(stepsMap).sort((a, b) => a.stepOrder - b.stepOrder);
 
   return (
-    <div className="rounded-2xl p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm mb-8">
+    <div className="rounded-2xl p-6 bg-white dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 shadow-sm mb-8">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-100 dark:border-slate-800">
         <div>

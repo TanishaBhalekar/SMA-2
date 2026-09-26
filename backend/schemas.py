@@ -2,9 +2,29 @@
 Pydantic schemas and DTOs for Unified Progressive Entity Resolution & Data Repository (PRJ-07).
 """
 
-from datetime import datetime
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Union
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
+
+
+def serialize_utc_iso(dt: Optional[Union[datetime, str]]) -> Optional[str]:
+    """Ensures created_at/updated_at serializes as an ISO 8601 string with UTC indicator 'Z'."""
+    if dt is None:
+        return None
+    if isinstance(dt, datetime):
+        if dt.tzinfo is not None:
+            dt_utc = dt.astimezone(timezone.utc)
+        else:
+            dt_utc = dt.replace(tzinfo=timezone.utc)
+        iso = dt_utc.isoformat()
+        if iso.endswith("+00:00"):
+            return iso[:-6] + "Z"
+        return iso if iso.endswith("Z") else iso + "Z"
+    if isinstance(dt, str):
+        if dt.endswith("+00:00"):
+            return dt[:-6] + "Z"
+        return dt if dt.endswith("Z") else dt + "Z"
+    return str(dt)
 
 
 # --- Health & System Info Schemas ---
@@ -30,9 +50,13 @@ class RawRecordCreate(RawRecordBase):
 class RawRecordResponse(RawRecordBase):
     id: int
     status: str
-    created_at: datetime
+    created_at: Union[datetime, str]
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, v):
+        return serialize_utc_iso(v)
 
 
 # --- Canonical Entity Schemas ---
@@ -49,10 +73,18 @@ class CanonicalEntityCreate(CanonicalEntityBase):
 
 class CanonicalEntityResponse(CanonicalEntityBase):
     id: int
-    created_at: datetime
-    updated_at: datetime
+    created_at: Union[datetime, str]
+    updated_at: Optional[Union[datetime, str]] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, v):
+        return serialize_utc_iso(v)
+
+    @field_serializer("updated_at")
+    def serialize_updated_at(self, v):
+        return serialize_utc_iso(v)
 
 
 # --- Entity Cluster Schemas ---
@@ -64,9 +96,13 @@ class EntityClusterResponse(BaseModel):
     resolution_method: str
     review_status: str
     match_metadata: Optional[Dict[str, Any]] = None
-    created_at: datetime
+    created_at: Union[datetime, str]
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, v):
+        return serialize_utc_iso(v)
 
 
 # --- Resolution Request & Run Schemas ---
@@ -83,10 +119,18 @@ class ResolutionJobResponse(BaseModel):
     total_records: int
     resolved_count: int
     ambiguous_count: int
-    created_at: datetime
-    completed_at: Optional[datetime] = None
+    created_at: Union[datetime, str]
+    completed_at: Optional[Union[datetime, str]] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, v):
+        return serialize_utc_iso(v)
+
+    @field_serializer("completed_at")
+    def serialize_completed_at(self, v):
+        return serialize_utc_iso(v)
 
 
 # --- Source Ingestion & Mapping Schemas ---
@@ -108,9 +152,13 @@ class SourceResponse(BaseModel):
     file_path: str
     record_count: int
     status: str
-    created_at: datetime
+    created_at: Union[datetime, str]
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, v):
+        return serialize_utc_iso(v)
 
 
 class SourceStatusResponse(BaseModel):
@@ -120,7 +168,13 @@ class SourceStatusResponse(BaseModel):
     source_type: str
     status: str
     record_count: int
-    created_at: datetime
+    created_at: Union[datetime, str]
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, v):
+        return serialize_utc_iso(v)
 
 
 class UploadResponse(BaseModel):
@@ -143,7 +197,7 @@ class WorkspaceBase(BaseModel):
 
 
 class WorkspaceCreate(BaseModel):
-    name: Optional[str] = Field(None, json_schema_extra={"example": "Session - 2026-09-24 00:54"})
+    name: Optional[str] = Field(None, json_schema_extra={"example": "Session – 2026-09-24 00:54"})
     description: Optional[str] = None
 
 
@@ -156,8 +210,8 @@ class WorkspaceResponse(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
-    created_at: datetime
-    updated_at: Optional[datetime] = None
+    created_at: Union[datetime, str]
+    updated_at: Optional[Union[datetime, str]] = None
     total_sources: int = 0
     total_records: int = 0
     total_attributes_indexed: int = 0
@@ -166,15 +220,30 @@ class WorkspaceResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @field_serializer("created_at")
+    def serialize_created_at(self, v):
+        return serialize_utc_iso(v)
+
+    @field_serializer("updated_at")
+    def serialize_updated_at(self, v):
+        return serialize_utc_iso(v)
+
 
 class WorkspaceDetailResponse(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
-    created_at: datetime
-    updated_at: Optional[datetime] = None
+    created_at: Union[datetime, str]
+    updated_at: Optional[Union[datetime, str]] = None
     sources: List[SourceResponse] = []
     stats: Dict[str, Any] = {}
 
     model_config = ConfigDict(from_attributes=True)
 
+    @field_serializer("created_at")
+    def serialize_created_at(self, v):
+        return serialize_utc_iso(v)
+
+    @field_serializer("updated_at")
+    def serialize_updated_at(self, v):
+        return serialize_utc_iso(v)

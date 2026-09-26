@@ -5,6 +5,7 @@ import {
   Search, AlertTriangle
 } from 'lucide-react';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { formatSessionDate, formatSessionTitle } from '../utils/dateUtils';
 
 export default function SessionHistoryDrawer() {
   const {
@@ -29,14 +30,19 @@ export default function SessionHistoryDrawer() {
 
   if (!historyDrawerOpen) return null;
 
-  const filteredWorkspaces = workspaces.filter((ws) =>
-    ws.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (ws.description && ws.description.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const filteredWorkspaces = workspaces.filter((ws) => {
+    const title = formatSessionTitle(ws) || '';
+    const rawName = ws.name || '';
+    return (
+      rawName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (ws.description && ws.description.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+  });
 
   const startRename = (ws) => {
     setEditingId(ws.id);
-    setEditName(ws.name);
+    setEditName(formatSessionTitle(ws) || ws.name);
   };
 
   const saveRename = async (id) => {
@@ -186,7 +192,7 @@ export default function SessionHistoryDrawer() {
                   </span>
                 </div>
                 <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                  "{currentWorkspace.name}" will be automatically saved to database when you upload your first file.
+                  "{formatSessionTitle(currentWorkspace) || currentWorkspace.name}" will be automatically saved to database when you upload your first file.
                 </p>
               </div>
             )}
@@ -253,9 +259,9 @@ export default function SessionHistoryDrawer() {
                             <h4
                               className="font-bold text-xs text-slate-900 dark:text-white truncate cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400"
                               onClick={() => switchWorkspace(ws.id)}
-                              title={ws.name}
+                              title={formatSessionTitle(ws) || ws.name}
                             >
-                              {ws.name}
+                              {formatSessionTitle(ws) || ws.name}
                             </h4>
                             <button
                               onClick={() => startRename(ws)}
@@ -268,12 +274,7 @@ export default function SessionHistoryDrawer() {
                         )}
                         <div className="text-[11px] text-slate-400 font-mono mt-0.5">
                           {ws.created_at
-                            ? new Date(ws.created_at).toLocaleString(undefined, {
-                                month: 'short',
-                                day: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })
+                            ? formatSessionDate(ws.created_at)
                             : 'Baseline'}
                         </div>
                       </div>

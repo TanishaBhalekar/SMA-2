@@ -4,6 +4,7 @@ import {
   Building, MapPin, AtSign, CreditCard, ExternalLink, CheckCircle2
 } from 'lucide-react';
 import SourceBadge from './SourceBadge';
+import { formatSessionDate } from '../utils/dateUtils';
 
 export default function MasterEntityCard({ entity, hops = [], lineage = [] }) {
   if (!entity) return null;
@@ -69,9 +70,9 @@ export default function MasterEntityCard({ entity, hops = [], lineage = [] }) {
   });
 
   return (
-    <div className="rounded-2xl p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm mb-8">
+    <div className="rounded-2xl p-6 bg-white dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 shadow-sm mb-8">
       {/* Primary Authoritative Master Entity Card (Single authoritative value, no duplicates) */}
-      <div className="p-6 rounded-xl bg-gradient-to-r from-slate-50 via-indigo-50/20 to-purple-50/20 dark:from-slate-950 dark:via-indigo-950/20 dark:to-purple-950/20 border border-slate-200 dark:border-slate-800 mb-6">
+      <div className="p-6 rounded-xl bg-gradient-to-r from-slate-50 via-indigo-50/20 to-purple-50/20 dark:from-slate-950 dark:via-indigo-950/20 dark:to-purple-950/20 border border-slate-200/80 dark:border-slate-800 mb-6 shadow-sm">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 rounded-2xl bg-indigo-600 dark:bg-indigo-500 text-white flex items-center justify-center font-bold text-xl shadow-lg shadow-indigo-500/25">
@@ -193,7 +194,7 @@ export default function MasterEntityCard({ entity, hops = [], lineage = [] }) {
               <span>Resolved Timestamp</span>
             </div>
             <div className="text-xs font-mono text-slate-600 dark:text-slate-400">
-              {entity.created_at ? new Date(entity.created_at).toLocaleTimeString() : 'Live BFS Resolution'}
+              {entity.created_at ? formatSessionDate(entity.created_at) : 'Live BFS Resolution'}
             </div>
           </div>
         </div>

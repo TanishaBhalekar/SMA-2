@@ -63,7 +63,7 @@ export default function AnalyticsDashboard({ stats, darkMode }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Silo Record Volume Bar Chart */}
-        <div className="rounded-2xl p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="rounded-2xl p-6 bg-white dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="font-bold text-slate-900 dark:text-white text-sm">
@@ -95,11 +95,24 @@ export default function AnalyticsDashboard({ stats, darkMode }) {
                 />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: darkMode ? '#0F172A' : '#FFFFFF',
+                    backgroundColor: darkMode ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
                     borderColor: darkMode ? '#334155' : '#E2E8F0',
                     borderRadius: '0.75rem',
-                    color: darkMode ? '#F8FAFC' : '#0F172A',
-                    fontSize: '12px',
+                    boxShadow: darkMode
+                      ? '0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.5)'
+                      : '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1)',
+                    padding: '8px 14px',
+                  }}
+                  itemStyle={{
+                    color: darkMode ? '#f8fafc' : '#0F172A',
+                    fontSize: '0.8125rem',
+                    fontWeight: '600',
+                  }}
+                  labelStyle={{
+                    color: darkMode ? '#94a3b8' : '#64748B',
+                    fontSize: '0.8125rem',
+                    fontWeight: '500',
+                    marginBottom: '2px',
                   }}
                 />
                 <Bar dataKey="records" radius={[6, 6, 0, 0]}>
@@ -113,7 +126,7 @@ export default function AnalyticsDashboard({ stats, darkMode }) {
         </div>
 
         {/* Canonical Field Index Distribution */}
-        <div className="rounded-2xl p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="rounded-2xl p-6 bg-white dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="font-bold text-slate-900 dark:text-white text-sm">
@@ -146,11 +159,24 @@ export default function AnalyticsDashboard({ stats, darkMode }) {
                 </Pie>
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: darkMode ? '#0F172A' : '#FFFFFF',
+                    backgroundColor: darkMode ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
                     borderColor: darkMode ? '#334155' : '#E2E8F0',
                     borderRadius: '0.75rem',
-                    color: darkMode ? '#F8FAFC' : '#0F172A',
-                    fontSize: '12px',
+                    boxShadow: darkMode
+                      ? '0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.5)'
+                      : '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1)',
+                    padding: '8px 14px',
+                  }}
+                  itemStyle={{
+                    color: darkMode ? '#f8fafc' : '#0F172A',
+                    fontSize: '0.8125rem',
+                    fontWeight: '600',
+                  }}
+                  labelStyle={{
+                    color: darkMode ? '#94a3b8' : '#64748B',
+                    fontSize: '0.8125rem',
+                    fontWeight: '500',
+                    marginBottom: '2px',
                   }}
                 />
                 <Legend
@@ -166,7 +192,7 @@ export default function AnalyticsDashboard({ stats, darkMode }) {
       </div>
 
       {/* Traversal Depth & Graph Convergence Card */}
-      <div className="rounded-2xl p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+      <div className="rounded-2xl p-6 bg-white dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="font-bold text-slate-900 dark:text-white text-sm">
@@ -186,7 +212,7 @@ export default function AnalyticsDashboard({ stats, darkMode }) {
           {hopDepthData.map((h, i) => (
             <div
               key={i}
-              className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/60"
+              className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/60 shadow-sm"
             >
               <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400 uppercase">
                 {h.depth}

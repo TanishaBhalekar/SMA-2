@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Search, Loader2, Sparkles, AlertCircle, RefreshCw, CheckCircle, Database, FolderKanban, ArrowRight } from 'lucide-react';
 import { api } from '../api/client';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { formatSessionTitle } from '../utils/dateUtils';
 import HopVisualizer from './HopVisualizer';
 import MasterEntityCard from './MasterEntityCard';
 import GeminiAccordion from './GeminiAccordion';
@@ -50,7 +51,7 @@ export default function DiscoveryExplorer({ onNavigateToSources }) {
   return (
     <div>
       {/* Search Control Bar */}
-      <div className="rounded-2xl p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm mb-8">
+      <div className="rounded-2xl p-6 bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-sm mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
           <div>
             <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
@@ -66,7 +67,7 @@ export default function DiscoveryExplorer({ onNavigateToSources }) {
             <FolderKanban className="w-3.5 h-3.5 text-indigo-500" />
             <span className="text-[11px] text-slate-400">Scope:</span>
             <span className="font-semibold text-slate-900 dark:text-white truncate max-w-[160px]">
-              {currentWorkspace?.name || 'Active Session'}
+              {formatSessionTitle(currentWorkspace) || 'Active Session'}
             </span>
             {currentWorkspace?.isDraft && (
               <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
@@ -85,7 +86,7 @@ export default function DiscoveryExplorer({ onNavigateToSources }) {
               id="seed-type-select"
               value={identifierType}
               onChange={(e) => setIdentifierType(e.target.value)}
-              className="w-full h-11 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              className="w-full h-11 px-3 rounded-xl border border-slate-300 dark:border-slate-700/80 bg-slate-50/70 dark:bg-slate-950/60 text-slate-800 dark:text-slate-200 text-xs font-semibold focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none transition-all"
             >
               <option value="email">Email Address</option>
               <option value="phone">Phone / Mobile</option>
@@ -102,7 +103,7 @@ export default function DiscoveryExplorer({ onNavigateToSources }) {
               value={identifierValue}
               onChange={(e) => setIdentifierValue(e.target.value)}
               placeholder="e.g. john@example.com or 9876543210..."
-              className="w-full h-11 pl-4 pr-10 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white placeholder-slate-400 text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              className="w-full h-11 pl-4 pr-10 rounded-xl border border-slate-300 dark:border-slate-700/80 bg-slate-50/70 dark:bg-slate-950/60 placeholder:text-slate-400 text-slate-800 dark:text-slate-200 font-medium text-sm font-mono focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none transition-all"
             />
             {identifierValue && (
               <button
@@ -119,7 +120,7 @@ export default function DiscoveryExplorer({ onNavigateToSources }) {
           <button
             type="submit"
             disabled={loading || !identifierValue.trim()}
-            className="h-11 px-6 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm flex items-center justify-center gap-2 shadow-md shadow-indigo-600/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            className="h-11 px-6 rounded-xl bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-md shadow-indigo-600/20 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 transition-all"
           >
             {loading ? (
               <>
@@ -191,19 +192,19 @@ export default function DiscoveryExplorer({ onNavigateToSources }) {
 
       {/* Clean Slate Landing Placeholder */}
       {!discoveryResult && !loading && !error && (
-        <div className="rounded-2xl p-10 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center shadow-sm">
-          <div className="w-12 h-12 mx-auto mb-4 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+        <div className="rounded-2xl p-10 bg-white dark:bg-slate-900/60 border border-dashed border-slate-300 dark:border-slate-800 text-center shadow-sm">
+          <div className="w-12 h-12 mx-auto mb-4 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shadow-sm">
             <Sparkles className="w-6 h-6" />
           </div>
           <h3 className="font-bold text-base text-slate-900 dark:text-white mb-2">
             Ready for Progressive Graph Traversal
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-6">
-            Querying is scoped to session <strong className="text-slate-800 dark:text-slate-200 font-semibold">{currentWorkspace?.name}</strong>.
+            Querying is scoped to session <strong className="text-slate-800 dark:text-slate-200 font-semibold">{formatSessionTitle(currentWorkspace)}</strong>.
             The progressive BFS engine traverses email, phone numbers, usernames, and member IDs across all uploaded silos in this session.
           </p>
 
-          <div className="inline-flex flex-col sm:flex-row items-center gap-2 p-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs">
+          <div className="inline-flex flex-col sm:flex-row items-center gap-2 p-1.5 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 text-xs">
             <span className="text-slate-400 px-2 font-medium">Quick suggestions:</span>
             <button
               onClick={() => {
@@ -211,7 +212,7 @@ export default function DiscoveryExplorer({ onNavigateToSources }) {
                 setIdentifierValue('john@example.com');
                 triggerSearch('email', 'john@example.com');
               }}
-              className="px-3 py-1 rounded-lg bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 font-mono text-[11px] shadow-sm border border-slate-200 dark:border-slate-700 transition-colors"
+              className="bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-mono text-xs px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
             >
               john@example.com
             </button>
@@ -221,7 +222,7 @@ export default function DiscoveryExplorer({ onNavigateToSources }) {
                 setIdentifierValue('9876543210');
                 triggerSearch('phone', '9876543210');
               }}
-              className="px-3 py-1 rounded-lg bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 font-mono text-[11px] shadow-sm border border-slate-200 dark:border-slate-700 transition-colors"
+              className="bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-mono text-xs px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
             >
               9876543210
             </button>

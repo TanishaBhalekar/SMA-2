@@ -25,11 +25,13 @@ def test_create_workspace():
     assert data["name"] == "Alpha Research Session"
     assert data["description"] == "Testing session"
     assert data["total_sources"] == 0
+    assert data["created_at"].endswith("Z")
 
     # Test auto-generated name when name is empty
     res2 = client.post("/api/workspaces", json={})
     assert res2.status_code == 201
-    assert res2.json()["name"].startswith("Session - ")
+    assert res2.json()["name"].startswith("Session – ") or res2.json()["name"].startswith("Session - ")
+    assert res2.json()["created_at"].endswith("Z")
 
 
 def test_list_and_get_workspaces():

@@ -4,6 +4,7 @@ Implements full data lineage, EAV indexing, progressive enrichment hops, and can
 """
 
 from datetime import datetime, timezone
+from typing import Optional
 from sqlalchemy import (
     Column, Integer, String, Text, Float, Boolean, DateTime,
     ForeignKey, Index, JSON
@@ -34,6 +35,26 @@ class Workspace(Base):
     attribute_indices = relationship("AttributeIndex", back_populates="workspace", cascade="all, delete-orphan")
     master_entities = relationship("MasterEntity", back_populates="workspace", cascade="all, delete-orphan")
 
+    @property
+    def created_at_iso(self) -> str:
+        """Outputs a timezone-aware ISO string ending in 'Z'."""
+        if not self.created_at:
+            return ""
+        iso = self.created_at.isoformat()
+        if iso.endswith("+00:00"):
+            return iso[:-6] + "Z"
+        return iso + ("Z" if not self.created_at.tzinfo and not iso.endswith("Z") else "")
+
+    @property
+    def updated_at_iso(self) -> Optional[str]:
+        """Outputs a timezone-aware ISO string ending in 'Z'."""
+        if not self.updated_at:
+            return None
+        iso = self.updated_at.isoformat()
+        if iso.endswith("+00:00"):
+            return iso[:-6] + "Z"
+        return iso + ("Z" if not self.updated_at.tzinfo and not iso.endswith("Z") else "")
+
 
 # ============================================================================
 # Operational Silo & Data Lineage Models
@@ -59,6 +80,16 @@ class Source(Base):
     workspace = relationship("Workspace", back_populates="sources")
     columns = relationship("SourceColumn", back_populates="source", cascade="all, delete-orphan")
     attributes = relationship("AttributeIndex", back_populates="source", cascade="all, delete-orphan")
+
+    @property
+    def created_at_iso(self) -> str:
+        """Outputs a timezone-aware ISO string ending in 'Z'."""
+        if not self.created_at:
+            return ""
+        iso = self.created_at.isoformat()
+        if iso.endswith("+00:00"):
+            return iso[:-6] + "Z"
+        return iso + ("Z" if not self.created_at.tzinfo and not iso.endswith("Z") else "")
 
 
 class SourceColumn(Base):
@@ -122,6 +153,26 @@ class MasterEntity(Base):
     workspace = relationship("Workspace", back_populates="master_entities")
     attributes = relationship("EntityAttribute", back_populates="entity", cascade="all, delete-orphan")
     hops = relationship("EnrichmentHop", back_populates="entity", cascade="all, delete-orphan", order_by="EnrichmentHop.step_order")
+
+    @property
+    def created_at_iso(self) -> str:
+        """Outputs a timezone-aware ISO string ending in 'Z'."""
+        if not self.created_at:
+            return ""
+        iso = self.created_at.isoformat()
+        if iso.endswith("+00:00"):
+            return iso[:-6] + "Z"
+        return iso + ("Z" if not self.created_at.tzinfo and not iso.endswith("Z") else "")
+
+    @property
+    def updated_at_iso(self) -> Optional[str]:
+        """Outputs a timezone-aware ISO string ending in 'Z'."""
+        if not self.updated_at:
+            return None
+        iso = self.updated_at.isoformat()
+        if iso.endswith("+00:00"):
+            return iso[:-6] + "Z"
+        return iso + ("Z" if not self.updated_at.tzinfo and not iso.endswith("Z") else "")
 
 
 class EntityAttribute(Base):
