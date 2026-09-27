@@ -36,6 +36,24 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+def ensure_schema_compatibility():
+    """Defensively ensures user_id exists on existing tables in SQLite."""
+    try:
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            for table in ["workspaces", "sources", "datasets", "session_histories"]:
+                try:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN user_id TEXT;"))
+                    conn.commit()
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
+ensure_schema_compatibility()
+
+
 
 def get_db() -> Generator[Session, None, None]:
     """

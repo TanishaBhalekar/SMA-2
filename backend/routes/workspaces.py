@@ -197,7 +197,7 @@ def get_workspace(
     if not workspace:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Workspace with id='{workspace_id}' not found."
+            detail="Workspace not found"
         )
 
     sources = db.query(Source).filter_by(workspace_id=workspace_id).order_by(Source.created_at.asc()).all()
@@ -229,7 +229,7 @@ def get_workspace_stats_endpoint(
     if not workspace:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Workspace with id='{workspace_id}' not found."
+            detail="Workspace not found"
         )
 
     return _get_workspace_stats(db, workspace_id)
@@ -249,7 +249,7 @@ def run_workspace_resolution(
     if not workspace:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Workspace with id='{workspace_id}' not found."
+            detail="Workspace not found"
         )
 
     from backend.services.enrichment_engine import resolve_workspace_entities
@@ -279,7 +279,7 @@ def update_workspace(
     if not workspace:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Workspace with id='{workspace_id}' not found."
+            detail="Workspace not found"
         )
 
     if req.name is not None and req.name.strip():
@@ -322,7 +322,7 @@ def delete_workspace(
     if not workspace:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Workspace with id='{workspace_id}' not found."
+            detail="Workspace not found"
         )
 
     # 1. Unlink/delete any physical files from uploads/

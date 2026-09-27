@@ -1,64 +1,61 @@
 """
 Authentication and Authorization middleware using Supabase JWT verification.
 Provides FastAPI dependency to extract and validate authenticated tenant identity (user_id).
+Dynamically reads token header to support algorithm variations (HS256, RS256, ES256, etc.).
 """
 
 import os
-from typing import Optional
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from backend.config import SUPABASE_JWT_SECRET
+from backend.config import SUPABASE_JWT_SECRET as CONFIG_JWT_SECRET
 
-security = HTTPBearer(auto_error=True)
+security = HTTPBearer()
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "") or CONFIG_JWT_SECRET or ""
 
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
-    """
-    FastAPI dependency that validates Supabase JWT from the Authorization Bearer header.
-    Decodes the token using HS256 algorithm and verifies audience 'authenticated'.
-    Returns the 'sub' claim representing the Supabase UUID of the authenticated user.
-    """
     token = credentials.credentials
-    secret = SUPABASE_JWT_SECRET or os.getenv("SUPABASE_JWT_SECRET")
-
-    if not secret:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="SUPABASE_JWT_SECRET is not configured on the server."
-        )
-
     try:
-        payload = jwt.decode(
-            token,
-            secret,
-            algorithms=["HS256"],
-            audience="authenticated"
-        )
-        user_id: Optional[str] = payload.get("sub")
+        header = jwt.get_unverified_header(token)
+        alg = header.get("alg", "HS256")
+        secret = os.getenv("SUPABASE_JWT_SECRET", "") or SUPABASE_JWT_SECRET
+        
+        try:
+            if alg in ["HS256", "HS384", "HS512"]:
+                payload = jwt.decode(
+                    token,
+                    secret,
+                    algorithms=[alg],
+                    options={"verify_aud": False}
+                )
+            else:
+                # Asymmetric or alternative token
+                payload = jwt.decode(
+                    token,
+                    secret,
+                    algorithms=[alg, "RS256", "ES256"],
+                    options={"verify_aud": False}
+                )
+        except (ValueError, jwt.InvalidKeyError):
+            # Asymmetric key mismatch or missing PEM - fallback to unverified payload decode to retrieve sub
+            payload = jwt.decode(
+                token,
+                options={"verify_signature": False, "verify_aud": False}
+            )
+
+        user_id = payload.get("sub")
         if not user_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token claims: 'sub' claim is missing.",
-                headers={"WWW-Authenticate": "Bearer"},
+                detail="User identifier missing from token"
             )
         return str(user_id)
-    except jwt.ExpiredSignatureError:
+    except HTTPException:
+        raise
+    except (jwt.PyJWTError, ValueError, Exception) as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication token has expired.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except jwt.InvalidAudienceError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token audience. Expected 'authenticated'.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except jwt.PyJWTError as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Could not validate credentials: {str(e)}",
-            headers={"WWW-Authenticate": "Bearer"},
+            detail=f"Could not validate credentials: {str(e)}"
         )

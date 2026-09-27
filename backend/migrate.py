@@ -45,6 +45,13 @@ def run_migration():
                 conn.execute(text("ALTER TABLE workspaces ADD COLUMN user_id VARCHAR(255)"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_workspaces_user_id ON workspaces (user_id)"))
 
+        if "sources" in existing_tables:
+            columns = [col["name"] for col in inspector.get_columns("sources")]
+            if "user_id" not in columns:
+                print("    [+] Adding missing column 'user_id' to table 'sources'...")
+                conn.execute(text("ALTER TABLE sources ADD COLUMN user_id VARCHAR(255)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_sources_user_id ON sources (user_id)"))
+
         for table_name in ["sources", "attribute_indices", "master_entities"]:
             if table_name in existing_tables:
                 columns = [col["name"] for col in inspector.get_columns(table_name)]

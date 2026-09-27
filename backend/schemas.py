@@ -147,6 +147,7 @@ class MappingConfirmationRequest(BaseModel):
 class SourceResponse(BaseModel):
     id: int
     workspace_id: Optional[str] = None
+    user_id: Optional[str] = None
     name: str
     source_type: str
     file_path: str
@@ -164,6 +165,7 @@ class SourceResponse(BaseModel):
 class SourceStatusResponse(BaseModel):
     source_id: int
     workspace_id: Optional[str] = None
+    user_id: Optional[str] = None
     name: str
     source_type: str
     status: str
@@ -180,6 +182,7 @@ class SourceStatusResponse(BaseModel):
 class UploadResponse(BaseModel):
     source_id: int
     workspace_id: Optional[str] = None
+    user_id: Optional[str] = None
     name: str
     source_type: str
     file_path: str
@@ -188,6 +191,12 @@ class UploadResponse(BaseModel):
     sample_rows: List[Dict[str, Any]]
     suggested_mappings: Dict[str, Dict[str, Any]]
     column_samples: Optional[Dict[str, List[str]]] = None
+
+
+class IngestPayload(BaseModel):
+    source_id: Optional[int] = None
+    workspace_id: Optional[str] = None
+    chunksize: Optional[int] = 5000
 
 
 # --- Workspace & Ingestion Session Schemas ---

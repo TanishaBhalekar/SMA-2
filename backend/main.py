@@ -3,8 +3,9 @@ Main Application Entrypoint for Unified Progressive Entity Resolution & Data Rep
 """
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from backend.database import engine, Base
 from backend.routes import api_router
 from backend.config import DATABASE_URL, GEMINI_API_KEY
@@ -15,6 +16,16 @@ from backend.migrate import run_migration
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Inline SQLite defensive column creation for environments without migrations
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        for table in ["workspaces", "sources", "datasets", "session_histories"]:
+            try:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN user_id TEXT;"))
+                conn.commit()
+            except Exception:
+                pass
+
     # Ensure database tables and schema migrations exist on startup
     run_migration()
     yield
@@ -31,22 +42,50 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Global catch-all CORS header injector for any 4xx/5xx or OPTIONS drops
+class SafeCORSResponseMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "OPTIONS":
+            response = Response(status_code=204)
+        else:
+            try:
+                response = await call_next(request)
+            except Exception as exc:
+                # Ensure 500 crashes still have CORS headers attached
+                from fastapi.responses import JSONResponse
+                response = JSONResponse(
+                    status_code=500,
+                    content={"detail": f"Internal Server Error: {str(exc)}"}
+                )
+
+        origin = request.headers.get("origin")
+        if origin:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+            response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, Accept, Origin, X-Requested-With, X-Workspace-Id, *"
+            response.headers["Access-Control-Expose-Headers"] = "*"
+        return response
+
+
+app.add_middleware(SafeCORSResponseMiddleware)
+
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
 # Enable CORS for frontend development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "*",
-    ],
-    allow_origin_regex=r"https?://.*",
+    allow_origins=origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Include API Routers

@@ -1,11 +1,13 @@
 """
 Endpoints for triggering progressive entity resolution runs and reviewing clusters.
+Enforces authenticated tenant identity.
 """
 
 from typing import List
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from backend.database import get_db
+from backend.auth import get_current_user
 from backend.models import EntityCluster, ResolutionJob
 from backend.schemas import (
     EntityClusterResponse,
@@ -20,6 +22,7 @@ router = APIRouter()
 def list_clusters(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
+    user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -32,6 +35,7 @@ def list_clusters(
 def list_resolution_jobs(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
+    user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -43,6 +47,7 @@ def list_resolution_jobs(
 @router.post("/run", response_model=ResolutionJobResponse, status_code=202)
 def trigger_resolution_run(
     params: ResolutionRunRequest,
+    user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """

@@ -70,6 +70,7 @@ class Source(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     workspace_id = Column(String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True, index=True)
+    user_id = Column(String, index=True, nullable=True)
     name = Column(String(255), nullable=False, index=True)
     source_type = Column(String(50), nullable=False)  # 'CSV' or 'SQL'
     file_path = Column(String(500), nullable=False)
