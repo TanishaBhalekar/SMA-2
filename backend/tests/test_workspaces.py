@@ -12,8 +12,18 @@ from backend.main import app
 from backend.database import SessionLocal
 from backend.models import Workspace, Source, AttributeIndex, MasterEntity, EntityAttribute, EnrichmentHop
 from backend.services.enrichment_engine import progressive_enrich
+from backend.auth import get_current_user
 
 client = TestClient(app)
+
+TEST_USER_ID = "test-user-uuid"
+
+
+@pytest.fixture(autouse=True)
+def override_auth():
+    app.dependency_overrides[get_current_user] = lambda: TEST_USER_ID
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_create_workspace():
@@ -112,8 +122,8 @@ def test_workspace_isolation_and_cascade_delete():
 
     try:
         # Create 2 workspaces
-        ws1 = Workspace(id=ws1_id, name="Session 1")
-        ws2 = Workspace(id=ws2_id, name="Session 2")
+        ws1 = Workspace(id=ws1_id, name="Session 1", user_id=TEST_USER_ID)
+        ws2 = Workspace(id=ws2_id, name="Session 2", user_id=TEST_USER_ID)
         db.add_all([ws1, ws2])
         db.commit()
 
@@ -172,3 +182,49 @@ def test_workspace_isolation_and_cascade_delete():
         client.delete(f"/api/workspaces/{ws1_id}")
         client.delete(f"/api/workspaces/{ws2_id}")
         db.close()
+
+
+def test_cross_tenant_isolation():
+    """
+    Verify strict multi-tenant isolation:
+    User A cannot view, modify, or delete User B's workspaces.
+    """
+    user_a = "tenant-user-alpha"
+    user_b = "tenant-user-beta"
+
+    # User A creates a workspace
+    app.dependency_overrides[get_current_user] = lambda: user_a
+    res_a = client.post("/api/workspaces", json={"name": "Alpha Tenant Workspace"})
+    assert res_a.status_code == 201
+    ws_a_id = res_a.json()["id"]
+
+    try:
+        # User A sees it
+        list_a = client.get("/api/workspaces?include_empty=true")
+        assert list_a.status_code == 200
+        assert any(w["id"] == ws_a_id for w in list_a.json())
+
+        # Switch to User B
+        app.dependency_overrides[get_current_user] = lambda: user_b
+
+        # User B cannot see User A's workspace in list
+        list_b = client.get("/api/workspaces?include_empty=true")
+        assert list_b.status_code == 200
+        assert not any(w["id"] == ws_a_id for w in list_b.json())
+
+        # User B cannot GET User A's workspace directly
+        get_b = client.get(f"/api/workspaces/{ws_a_id}")
+        assert get_b.status_code == 404
+
+        # User B cannot PATCH User A's workspace
+        patch_b = client.patch(f"/api/workspaces/{ws_a_id}", json={"name": "Hacked Name"})
+        assert patch_b.status_code == 404
+
+        # User B cannot DELETE User A's workspace
+        del_b = client.delete(f"/api/workspaces/{ws_a_id}")
+        assert del_b.status_code == 404
+
+    finally:
+        # Cleanup as User A
+        app.dependency_overrides[get_current_user] = lambda: user_a
+        client.delete(f"/api/workspaces/{ws_a_id}")

@@ -6,33 +6,17 @@ import SourceManager from './components/SourceManager';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import SessionHistoryDrawer from './components/SessionHistoryDrawer';
 import { WorkspaceProvider, useWorkspace } from './context/WorkspaceContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import Login from './pages/Login';
 import { api, detectActiveBackend } from './api/client';
 
-function AppContent() {
+function AppContent({ darkMode, setDarkMode }) {
   const { currentWorkspace } = useWorkspace();
-
-  // Theme state persisted in localStorage
-  const [darkMode, setDarkMode] = useState(() => {
-    const saved = localStorage.getItem('theme');
-    if (saved) return saved === 'dark';
-    return true; // Default to dark mode for sleek modern dev aesthetics
-  });
 
   const [activeTab, setActiveTab] = useState('search');
   const [backendOnline, setBackendOnline] = useState(true);
   const [stats, setStats] = useState(null);
   const [loadingStats, setLoadingStats] = useState(false);
-
-  // Sync theme changes with DOM and localStorage
-  useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
-    }
-  }, [darkMode]);
 
   // Check backend connectivity and fetch stats for the current workspace
   const fetchStats = async () => {
@@ -76,7 +60,7 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200">
-      {/* Global Header with Workspace Controls */}
+      {/* Global Header with Workspace Controls and Sign Out */}
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -117,11 +101,11 @@ function AppContent() {
               PRJ-07: Unified Progressive Entity Resolution Engine
             </span>
             <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800">
-              v2.5-Workspaces
+              v2.5-MultiTenant
             </span>
           </div>
           <div>
-            Built with React 18, Tailwind CSS, Lucide Icons & Recharts • Google Gemini Integrated
+            Built with React 18, Tailwind CSS, Lucide Icons & Recharts • Supabase Auth Protected
           </div>
         </div>
       </footer>
@@ -129,11 +113,58 @@ function AppContent() {
   );
 }
 
-export default function App() {
+function AppRoot() {
+  const { user, loading } = useAuth();
+
+  // Theme state persisted in localStorage
+  const [darkMode, setDarkMode] = useState(() => {
+    const saved = localStorage.getItem('theme');
+    if (saved) return saved === 'dark';
+    return true; // Default to dark mode
+  });
+
+  // Sync theme changes with DOM and localStorage
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [darkMode]);
+
+  // Loading state while verifying Supabase session
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+            Verifying Supabase authentication...
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // If no user is logged in, show Login page
+  if (!user) {
+    return <Login darkMode={darkMode} setDarkMode={setDarkMode} />;
+  }
+
+  // If authenticated, provide workspace context and render main dashboard
   return (
     <WorkspaceProvider>
-      <AppContent />
+      <AppContent darkMode={darkMode} setDarkMode={setDarkMode} />
     </WorkspaceProvider>
   );
 }
 
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppRoot />
+    </AuthProvider>
+  );
+}

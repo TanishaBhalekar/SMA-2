@@ -1,6 +1,7 @@
 """
 API Route Handlers for Workspaces & Ingestion Sessions (PRJ-07).
 Provides creation, listing with aggregated telemetry, retrieval, renaming, and cascading deletion.
+Fully isolated per tenant using Supabase JWT authentication.
 """
 
 import os
@@ -14,6 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from backend.database import get_db
+from backend.auth import get_current_user
 from backend.models import (
     Workspace,
     Source,
@@ -63,10 +65,11 @@ def _get_workspace_stats(db: Session, workspace_id: str) -> dict:
 @router.post("", response_model=WorkspaceResponse, status_code=status.HTTP_201_CREATED)
 def create_workspace(
     req: WorkspaceCreate,
+    user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Creates a new dynamic ingestion workspace / session.
+    Creates a new dynamic ingestion workspace / session scoped to the authenticated tenant.
     Defaults name to 'Session – <Current Date/Time>' if omitted.
     """
     now_utc = datetime.now(timezone.utc)
@@ -77,6 +80,7 @@ def create_workspace(
 
     workspace = Workspace(
         id=ws_id,
+        user_id=user_id,
         name=session_name,
         description=req.description,
         created_at=now_utc,
@@ -88,6 +92,7 @@ def create_workspace(
 
     return WorkspaceResponse(
         id=workspace.id,
+        user_id=workspace.user_id,
         name=workspace.name,
         description=workspace.description,
         created_at=workspace.created_at_iso or workspace.created_at,
@@ -104,22 +109,26 @@ def create_workspace(
 def list_workspaces(
     include_empty: bool = False,
     cleanup: bool = False,
+    user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Lists saved past sessions along with aggregated statistics
-    (total sources count, total records ingested, discovered entities, etc.).
+    Lists saved past sessions along with aggregated statistics.
+    Strictly isolated: returns ONLY workspaces where Workspace.user_id == user_id.
     By default, only returns workspaces that have sources_count > 0.
-    If cleanup=True, automatically purges empty orphan workspaces before listing.
+    If cleanup=True, automatically purges empty orphan workspaces for this user.
     """
     if cleanup:
-        empty_workspaces = db.query(Workspace).filter(~Workspace.sources.any()).all()
+        empty_workspaces = db.query(Workspace).filter(
+            Workspace.user_id == user_id,
+            ~Workspace.sources.any()
+        ).all()
         for ws in empty_workspaces:
             db.delete(ws)
         if empty_workspaces:
             db.commit()
 
-    query = db.query(Workspace)
+    query = db.query(Workspace).filter(Workspace.user_id == user_id)
     if not include_empty:
         query = query.filter(Workspace.sources.any())
 
@@ -133,6 +142,7 @@ def list_workspaces(
         results.append(
             WorkspaceResponse(
                 id=ws.id,
+                user_id=ws.user_id,
                 name=ws.name,
                 description=ws.description,
                 created_at=ws.created_at_iso or ws.created_at,
@@ -151,12 +161,16 @@ def list_workspaces(
 @router.post("/purge-empty", status_code=status.HTTP_200_OK)
 @router.delete("/purge-empty", status_code=status.HTTP_200_OK)
 def purge_empty_workspaces(
+    user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Purges all empty orphan workspaces (workspaces having 0 sources).
+    Purges all empty orphan workspaces belonging to the authenticated tenant.
     """
-    empty_workspaces = db.query(Workspace).filter(~Workspace.sources.any()).all()
+    empty_workspaces = db.query(Workspace).filter(
+        Workspace.user_id == user_id,
+        ~Workspace.sources.any()
+    ).all()
     purged_count = len(empty_workspaces)
     for ws in empty_workspaces:
         db.delete(ws)
@@ -172,16 +186,18 @@ def purge_empty_workspaces(
 @router.get("/{workspace_id}", response_model=WorkspaceDetailResponse)
 def get_workspace(
     workspace_id: str,
+    user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Retrieves workspace metadata, its uploaded sources, and isolated telemetry.
+    Enforces tenant ownership.
     """
-    workspace = db.query(Workspace).filter_by(id=workspace_id).first()
+    workspace = db.query(Workspace).filter(Workspace.id == workspace_id, Workspace.user_id == user_id).first()
     if not workspace:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Workspace with id='{workspace_id}' not found."
+            detail="Workspace not found"
         )
 
     sources = db.query(Source).filter_by(workspace_id=workspace_id).order_by(Source.created_at.asc()).all()
@@ -189,6 +205,7 @@ def get_workspace(
 
     return WorkspaceDetailResponse(
         id=workspace.id,
+        user_id=workspace.user_id,
         name=workspace.name,
         description=workspace.description,
         created_at=workspace.created_at_iso or workspace.created_at,
@@ -201,17 +218,18 @@ def get_workspace(
 @router.get("/{workspace_id}/stats")
 def get_workspace_stats_endpoint(
     workspace_id: str,
+    user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Returns isolated telemetry for the specified workspace session:
-    master entities discovered, cross-silo links formed, indexed records, and attributes.
+    Returns isolated telemetry for the specified workspace session.
+    Enforces tenant ownership.
     """
-    workspace = db.query(Workspace).filter_by(id=workspace_id).first()
+    workspace = db.query(Workspace).filter(Workspace.id == workspace_id, Workspace.user_id == user_id).first()
     if not workspace:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Workspace with id='{workspace_id}' not found."
+            detail="Workspace not found"
         )
 
     return _get_workspace_stats(db, workspace_id)
@@ -220,18 +238,18 @@ def get_workspace_stats_endpoint(
 @router.post("/{workspace_id}/resolve")
 def run_workspace_resolution(
     workspace_id: str,
+    user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Executes a session-wide connected component graph resolution pass over all
-    indexed records in this workspace, discovering disjoint identity clusters
-    and persisting master entities, attributes, and discovery hops.
+    indexed records in this workspace, verifying tenant ownership.
     """
-    workspace = db.query(Workspace).filter_by(id=workspace_id).first()
+    workspace = db.query(Workspace).filter(Workspace.id == workspace_id, Workspace.user_id == user_id).first()
     if not workspace:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Workspace with id='{workspace_id}' not found."
+            detail="Workspace not found"
         )
 
     from backend.services.enrichment_engine import resolve_workspace_entities
@@ -250,16 +268,18 @@ def run_workspace_resolution(
 def update_workspace(
     workspace_id: str,
     req: WorkspaceUpdate,
+    user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Renames or updates the description of a workspace session.
+    Enforces tenant ownership.
     """
-    workspace = db.query(Workspace).filter_by(id=workspace_id).first()
+    workspace = db.query(Workspace).filter(Workspace.id == workspace_id, Workspace.user_id == user_id).first()
     if not workspace:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Workspace with id='{workspace_id}' not found."
+            detail="Workspace not found"
         )
 
     if req.name is not None and req.name.strip():
@@ -275,6 +295,7 @@ def update_workspace(
 
     return WorkspaceResponse(
         id=workspace.id,
+        user_id=workspace.user_id,
         name=workspace.name,
         description=workspace.description,
         created_at=workspace.created_at_iso or workspace.created_at,
@@ -290,16 +311,18 @@ def update_workspace(
 @router.delete("/{workspace_id}", status_code=status.HTTP_200_OK)
 def delete_workspace(
     workspace_id: str,
+    user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Cascade-deletes a workspace, its uploaded files, and all associated EAV and entity records.
+    Enforces tenant ownership.
     """
-    workspace = db.query(Workspace).filter_by(id=workspace_id).first()
+    workspace = db.query(Workspace).filter(Workspace.id == workspace_id, Workspace.user_id == user_id).first()
     if not workspace:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Workspace with id='{workspace_id}' not found."
+            detail="Workspace not found"
         )
 
     # 1. Unlink/delete any physical files from uploads/

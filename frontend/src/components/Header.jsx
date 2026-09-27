@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import {
   Sun, Moon, Database, Search, BarChart3,
-  Sparkles, Clock, Plus, Edit2, Check, X, FolderKanban
+  Sparkles, Clock, Plus, Edit2, Check, X, FolderKanban, LogOut
 } from 'lucide-react';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { useAuth } from '../context/AuthContext';
 import { formatSessionTitle } from '../utils/dateUtils';
 
 export default function Header({ activeTab, setActiveTab, darkMode, setDarkMode, backendOnline = true }) {
+  const { user, signOut } = useAuth();
   const {
     currentWorkspace,
     workspaces,
@@ -185,6 +187,26 @@ export default function Header({ activeTab, setActiveTab, darkMode, setDarkMode,
             <Moon className="w-4 h-4 text-slate-600 transition-transform hover:-rotate-12" />
           )}
         </button>
+
+        {/* User Identity Pill & Sign Out Button */}
+        <div className="flex items-center gap-1.5 pl-1 border-l border-slate-200 dark:border-slate-800">
+          {user?.email && (
+            <span
+              className="hidden xl:inline text-[11px] font-mono font-medium text-slate-500 dark:text-slate-400 max-w-[130px] truncate"
+              title={user.email}
+            >
+              {user.email}
+            </span>
+          )}
+          <button
+            onClick={signOut}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/50 hover:text-rose-700 dark:hover:text-rose-300 transition-all text-xs font-semibold shrink-0 shadow-sm"
+            title={`Signed in as ${user?.email || 'authenticated user'}. Click to Sign Out.`}
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Sign Out</span>
+          </button>
+        </div>
       </div>
     </header>
   );

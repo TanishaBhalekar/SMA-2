@@ -38,6 +38,21 @@ def init_database():
     print("[*] Creating all database tables via Base.metadata.create_all...")
     Base.metadata.create_all(bind=engine)
 
+    # Defensive inline SQLite column creation if tables pre-existed
+    try:
+        from sqlalchemy import text
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE workspaces ADD COLUMN user_id TEXT;"))
+    except Exception:
+        pass
+
+    try:
+        from sqlalchemy import text
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE sources ADD COLUMN user_id TEXT;"))
+    except Exception:
+        pass
+
     inspector = inspect(engine)
     table_names = inspector.get_table_names()
     print(f"[+] Database initialization successful. ({len(table_names)} tables verified)")

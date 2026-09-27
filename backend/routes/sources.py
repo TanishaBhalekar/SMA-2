@@ -1,6 +1,7 @@
 """
 API Route Handlers for Operational Sources and Ingestion (PRJ-07).
 Manages file uploads, AI-driven schema suggestion, mapping confirmation, and background batch ingestion.
+Strictly isolated per tenant using authenticated Supabase user_id.
 """
 
 import os
@@ -13,11 +14,13 @@ from fastapi import (
     APIRouter, Depends, HTTPException, UploadFile, File, Form, Header, Query,
     BackgroundTasks, status
 )
-from sqlalchemy import text
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
 from backend.database import get_db, SessionLocal
+from backend.auth import get_current_user
 from backend.models import (
+    Workspace,
     Source,
     SourceColumn,
     AttributeIndex,
@@ -33,7 +36,8 @@ from backend.schemas import (
     SourceResponse,
     SourceStatusResponse,
     UploadResponse,
-    MappingConfirmationRequest
+    MappingConfirmationRequest,
+    IngestPayload
 )
 
 router = APIRouter()
@@ -59,20 +63,57 @@ def _run_ingestion_background(source_id: int):
         db.close()
 
 
+def _get_tenant_source(db: Session, source_id: int, user_id: str) -> Source:
+    """
+    Fetches a source ensuring strict tenant isolation via direct user_id or Workspace owner.
+    """
+    allowed_workspaces = [
+        w[0] for w in db.query(Workspace.id).filter(
+            (Workspace.user_id == user_id) | (Workspace.user_id.is_(None))
+        ).all()
+    ]
+    source = (
+        db.query(Source)
+        .filter(
+            Source.id == source_id,
+            (
+                (Source.user_id == user_id) |
+                (Source.workspace_id.in_(allowed_workspaces)) |
+                ((Source.user_id.is_(None)) & (Source.workspace_id.is_(None)))
+            )
+        )
+        .first()
+    )
+    if not source:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Source with id={source_id} not found."
+        )
+    return source
+
+
 @router.post("/upload", response_model=UploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_source(
     file: UploadFile = File(...),
     source_type: Optional[str] = Form(None),
     workspace_id: Optional[str] = Form(None),
     x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
+    user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Upload an operational silo dataset (.csv or .sql).
     Saves file to disk, inspects schema, and executes AI-assisted column mapping suggestions.
-    Associates the dataset to the specified active workspace session.
+    Associates the dataset to the specified active workspace session after verifying ownership.
     """
     target_workspace_id = workspace_id or x_workspace_id
+    if target_workspace_id:
+        ws = db.query(Workspace).filter(Workspace.id == target_workspace_id).first()
+        if not ws or (ws.user_id is not None and ws.user_id != user_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Workspace not found"
+            )
 
     filename = file.filename or "unknown_source"
     ext = Path(filename).suffix.lower()
@@ -117,9 +158,10 @@ async def upload_source(
     # Generate mapping suggestions using canonical rules and real samples
     suggested_mappings = suggest_mappings(columns=columns, sample_rows=sample_rows, column_samples=column_samples)
 
-    # Persist Source metadata in UPLOADED state
+    # Persist Source metadata in UPLOADED state scoped to authenticated tenant
     source = Source(
         workspace_id=target_workspace_id,
+        user_id=user_id,
         name=filename,
         source_type=detected_type,
         file_path=str(saved_path),
@@ -133,6 +175,7 @@ async def upload_source(
     return UploadResponse(
         source_id=source.id,
         workspace_id=source.workspace_id,
+        user_id=source.user_id,
         name=source.name,
         source_type=source.source_type,
         file_path=source.file_path,
@@ -149,18 +192,15 @@ def confirm_mapping(
     source_id: int,
     req: MappingConfirmationRequest,
     background_tasks: BackgroundTasks,
+    user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Confirms user-verified column mappings and triggers asynchronous chunked batch ingestion.
     Transitions Source status from UPLOADED -> MAPPED -> INDEXED.
+    Verifies tenant ownership of the source.
     """
-    source = db.query(Source).filter_by(id=source_id).first()
-    if not source:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Source with id={source_id} not found."
-        )
+    source = _get_tenant_source(db, source_id, user_id)
 
     # Remove existing mappings if re-confirming
     db.query(SourceColumn).filter_by(source_id=source.id).delete()
@@ -198,36 +238,49 @@ def list_sources(
     workspace_id: Optional[str] = Query(None, description="Filter sources by active workspace session"),
     skip: int = 0,
     limit: int = 100,
+    user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Lists operational sources, source types, statuses, and record counts.
-    Optionally filters by workspace_id.
+    Strictly isolated per tenant: verifies workspace ownership if workspace_id provided,
+    or filters by Workspace.user_id / Source.user_id.
     """
-    query = db.query(Source)
     if workspace_id:
-        query = query.filter(Source.workspace_id == workspace_id)
+        ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+        if not ws or (ws.user_id is not None and ws.user_id != user_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+        query = db.query(Source).filter(Source.workspace_id == workspace_id)
+    else:
+        allowed_workspaces = [
+            w[0] for w in db.query(Workspace.id).filter(
+                (Workspace.user_id == user_id) | (Workspace.user_id.is_(None))
+            ).all()
+        ]
+        query = db.query(Source).filter(
+            (Source.user_id == user_id) |
+            (Source.workspace_id.in_(allowed_workspaces)) |
+            ((Source.user_id.is_(None)) & (Source.workspace_id.is_(None)))
+        )
     return query.order_by(Source.created_at.desc()).offset(skip).limit(limit).all()
 
 
 @router.get("/{source_id}/status", response_model=SourceStatusResponse)
 def get_source_status(
     source_id: int,
+    user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Polling endpoint for source ingestion status and indexed record counts.
+    Verifies tenant ownership.
     """
-    source = db.query(Source).filter_by(id=source_id).first()
-    if not source:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Source with id={source_id} not found."
-        )
+    source = _get_tenant_source(db, source_id, user_id)
 
     return SourceStatusResponse(
         source_id=source.id,
         workspace_id=source.workspace_id,
+        user_id=source.user_id,
         name=source.name,
         source_type=source.source_type,
         status=source.status,
@@ -239,19 +292,16 @@ def get_source_status(
 @router.delete("/{source_id}", status_code=status.HTTP_200_OK)
 def delete_source(
     source_id: int,
+    user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Deletes an individual operational source, unlinks its stored file,
     cascades deletion across attributes, raw records, mappings, and source entity,
     and automatically re-triggers graph re-clustering for the active workspace.
+    Verifies tenant ownership.
     """
-    source = db.query(Source).filter_by(id=source_id).first()
-    if not source:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Source with id={source_id} not found."
-        )
+    source = _get_tenant_source(db, source_id, user_id)
 
     workspace_id = source.workspace_id
     source_name = source.name
@@ -328,3 +378,45 @@ def delete_source(
         "stats": updated_stats
     }
 
+
+@router.post("/ingest", status_code=status.HTTP_200_OK)
+def trigger_ingest(
+    payload: IngestPayload,
+    user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Triggers batch ingestion for a verified tenant source or all sources within a verified workspace.
+    Enforces tenant ownership.
+    """
+    target_sources = []
+    if payload.source_id:
+        source = _get_tenant_source(db, payload.source_id, user_id)
+        target_sources.append(source)
+    elif payload.workspace_id:
+        ws = db.query(Workspace).filter(Workspace.id == payload.workspace_id).first()
+        if not ws or (ws.user_id is not None and ws.user_id != user_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+        target_sources = db.query(Source).filter(Source.workspace_id == payload.workspace_id).all()
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Either 'source_id' or 'workspace_id' must be provided."
+        )
+
+    results = []
+    affected_workspaces = set()
+    for s in target_sources:
+        res = ingest_source(source_id=s.id, db=db, chunksize=payload.chunksize or 5000)
+        results.append(res)
+        if s.workspace_id:
+            affected_workspaces.add(s.workspace_id)
+
+    for ws_id in affected_workspaces:
+        resolve_workspace_entities(workspace_id=ws_id, db=db)
+
+    return {
+        "status": "success",
+        "ingested_count": len(results),
+        "details": results
+    }
