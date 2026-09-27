@@ -43,45 +43,44 @@ app = FastAPI(
 )
 
 # Global catch-all CORS header injector for any 4xx/5xx or OPTIONS drops
-class SafeCORSResponseMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        if request.method == "OPTIONS":
-            response = Response(status_code=204)
-        else:
-            try:
-                response = await call_next(request)
-            except Exception as exc:
+##class SafeCORSResponseMiddleware(BaseHTTPMiddleware):
+    ##async def dispatch(self, request: Request, call_next):
+       # if request.method == "OPTIONS":
+           # response = Response(status_code=204)
+        #else:
+            #try:
+                #response = await call_next(request)
+            #except Exception as exc:
                 # Ensure 500 crashes still have CORS headers attached
-                from fastapi.responses import JSONResponse
-                response = JSONResponse(
-                    status_code=500,
-                    content={"detail": f"Internal Server Error: {str(exc)}"}
-                )
+                #from fastapi.responses import JSONResponse
+                #response = JSONResponse(
+                   # status_code=500,
+                    #content={"detail": f"Internal Server Error: {str(exc)}"}
+               # )
 
-        origin = request.headers.get("origin")
-        if origin:
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-            response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, Accept, Origin, X-Requested-With, X-Workspace-Id, *"
-            response.headers["Access-Control-Expose-Headers"] = "*"
-        return response
+        #origin = request.headers.get("origin")
+        #if origin:
+            #response.headers["Access-Control-Allow-Origin"] = origin
+            #response.headers["Access-Control-Allow-Credentials"] = "true"
+          #  response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+            #response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, Accept, Origin, X-Requested-With, X-Workspace-Id, *"
+            #response.headers["Access-Control-Expose-Headers"] = "*"
+        #return response
 
 
-app.add_middleware(SafeCORSResponseMiddleware)
+#app.add_middleware(SafeCORSResponseMiddleware)
 
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://unified-entity-resolution-frontend.onrender.com",
 ]
 
-# Enable CORS for frontend development
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
