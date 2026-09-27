@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-let currentBaseUrl = 'http://localhost:8000';
+let currentBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export const apiClient = axios.create({
   baseURL: currentBaseUrl,
@@ -10,12 +10,13 @@ export const apiClient = axios.create({
 // Probe for live backend instance across localhost:8000, 127.0.0.1:8000, and relative proxy
 export async function detectActiveBackend() {
   const candidates = [
+    import.meta.env.VITE_API_URL,
     'http://localhost:8000',
     'http://127.0.0.1:8000',
     'http://localhost:8001',
     'http://127.0.0.1:8001',
     '',
-  ];
+  ].filter(Boolean);
   for (const base of candidates) {
     try {
       const url = base ? `${base}/api/health` : '/api/health';
