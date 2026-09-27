@@ -208,6 +208,7 @@ class WorkspaceUpdate(BaseModel):
 
 class WorkspaceResponse(BaseModel):
     id: str
+    user_id: Optional[str] = None
     name: str
     description: Optional[str] = None
     created_at: Union[datetime, str]
@@ -231,6 +232,7 @@ class WorkspaceResponse(BaseModel):
 
 class WorkspaceDetailResponse(BaseModel):
     id: str
+    user_id: Optional[str] = None
     name: str
     description: Optional[str] = None
     created_at: Union[datetime, str]

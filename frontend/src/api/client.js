@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { supabase } from '../lib/supabase';
 
 let currentBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -6,6 +7,22 @@ export const apiClient = axios.create({
   baseURL: currentBaseUrl,
   timeout: 30000,
 });
+
+// Request interceptor to automatically attach Supabase JWT Bearer token
+apiClient.interceptors.request.use(
+  async (config) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        config.headers.Authorization = `Bearer ${session.access_token}`;
+      }
+    } catch (err) {
+      console.warn('Failed to retrieve Supabase session for Authorization header:', err);
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
 // Probe for live backend instance across localhost:8000, 127.0.0.1:8000, and relative proxy
 export async function detectActiveBackend() {

@@ -1,5 +1,6 @@
 # Environment & Secrets
 .env
+frontend/.env
 .env.*
 !.env.example
 

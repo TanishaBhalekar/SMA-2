@@ -25,6 +25,7 @@ class Workspace(Base):
     __tablename__ = "workspaces"
 
     id = Column(String(36), primary_key=True, index=True)  # UUID string
+    user_id = Column(String, index=True, nullable=True)
     name = Column(String(255), nullable=False, index=True)
     description = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

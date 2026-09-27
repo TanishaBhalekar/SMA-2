@@ -21,3 +21,4 @@ else:
 # Core Configuration Settings
 DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./app.db")
 GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
+SUPABASE_JWT_SECRET: Optional[str] = os.getenv("SUPABASE_JWT_SECRET")

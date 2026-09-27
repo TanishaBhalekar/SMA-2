@@ -36,8 +36,15 @@ def run_migration():
     inspector = inspect(engine)
     existing_tables = inspector.get_table_names()
 
-    # 2. Check and add workspace_id column if missing in SQLite
+    # 2. Check and add workspace_id / user_id columns if missing in SQLite
     with engine.begin() as conn:
+        if "workspaces" in existing_tables:
+            columns = [col["name"] for col in inspector.get_columns("workspaces")]
+            if "user_id" not in columns:
+                print("    [+] Adding missing column 'user_id' to table 'workspaces'...")
+                conn.execute(text("ALTER TABLE workspaces ADD COLUMN user_id VARCHAR(255)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_workspaces_user_id ON workspaces (user_id)"))
+
         for table_name in ["sources", "attribute_indices", "master_entities"]:
             if table_name in existing_tables:
                 columns = [col["name"] for col in inspector.get_columns(table_name)]
